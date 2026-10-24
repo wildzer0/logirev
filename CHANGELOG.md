@@ -3,7 +3,7 @@
 All notable changes are listed here. Versions follow
 [Semantic Versioning](https://semver.org).
 
-## [1.1.0] — unreleased
+## [1.1.0] — 2026-10-24
 
 ### Added
 - **Pairing**: add devices to a Bolt or Unifying receiver without Logi
