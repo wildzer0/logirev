@@ -24,7 +24,7 @@ Hardware cannot be reached from WSL without
 
 | Program | Source | Purpose |
 |---|---|---|
-| `logirev` | `src/main.rs` | the background service |
+| `logirev` | `src/main.rs` | the background service (Windows: tray application without console) |
 | `logirevctl` | `src/bin/logirevctl.rs` | `scan`, `list`, `init`, `run`, `install-service` |
 
 Both are thin wrappers around the library in `src/lib.rs`.
@@ -43,6 +43,10 @@ Both are thin wrappers around the library in `src/lib.rs`.
 | `src/input/` | synthetic keyboard/mouse: `SendInput` (Windows), `uinput` (Linux) |
 | `src/instance.rs` | single-instance lock |
 | `src/service.rs` | start at log-in (systemd user unit) |
+| `src/status.rs` | snapshots and notices the daemon sends to the interface |
+| `src/ui/view.rs` | content of the tray menu and device window (portable, tested) |
+| `src/ui/windows/` | Win32 tray icon, menu, device window, autostart, device notifications |
+| `build.rs`, `res/logirev.manifest` | Windows manifest (Common Controls 6, per-monitor DPI) embedded at link time |
 | `src/logging.rs` | size-capped rotating log file |
 | `src/pcap.rs` | size-capped Wireshark capture (USBPcap link type) |
 | `tools/hidpp.lua` | Wireshark dissector |
@@ -52,9 +56,17 @@ Both are thin wrappers around the library in `src/lib.rs`.
 
 ```
  reader threads (1 per HID path) ──frame──▶ Transport queue ──wake──▶ ┐
- Ctrl+C handler ─────────────────────────────── Event::Quit ────────▶ ├─▶ daemon event loop
- (future) tray / foreground-window hooks ──── Event::... ──────────▶ ┘     (single thread)
+ Ctrl+C handler (terminal) ────────────────────── Event::Quit ──────▶ ├─▶ daemon event loop
+ UI thread: menu, WM_DEVICECHANGE ─── Event::Reload/Rescan/Quit ────▶ ┘     (own thread)
+                                                                            │
+ UI thread (Win32 message loop) ◀── WM_APP_UPDATE + queue ◀── UiUpdate ─────┘
 ```
+
+On Windows the main thread runs the Win32 message loop (tray icon, menu,
+device window) and the daemon runs on a second thread. The daemon publishes
+a `status::Snapshot` whenever something visible changes; the UI thread never
+talks to devices. Window-procedure state lives in a `RefCell` that is never
+held across nested message loops (menus, message boxes).
 
 - One **`Link`** per open receiver or direct device, holding a `Transport`
   and one **`Session`** per connected device (feature table, diverted
