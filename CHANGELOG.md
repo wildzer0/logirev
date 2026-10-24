@@ -3,7 +3,7 @@
 All notable changes are listed here. Versions follow
 [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
+## [1.2.0] — 2026-10-24
 
 ### Added
 - **Developer mode** (*Settings → Developer mode*): a *Technical* tab on
