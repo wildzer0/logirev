@@ -720,8 +720,10 @@ impl DpiChoices {
     /// DPI from the previous value to the next one".
     fn parse(bytes: &[u8]) -> Self {
         let values: Vec<u16> = bytes
-            .chunks_exact(2)
-            .map(|c| u16::from_be_bytes([c[0], c[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| u16::from_be_bytes(*c))
             .take_while(|&v| v != 0)
             .collect();
         match values.as_slice() {

@@ -697,9 +697,11 @@ impl Link {
     /// Handles a "diverted buttons" event: the list of buttons held now.
     fn on_buttons(&mut self, ctx: &mut Ctx, slot: u8, params: &[u8]) {
         let now: Vec<u16> = params
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .take(4)
-            .map(|c| u16::from_be_bytes([c[0], c[1]]))
+            .map(|c| u16::from_be_bytes(*c))
             .filter(|&cid| cid != 0)
             .collect();
         let Some(session) = self.sessions.get_mut(&slot) else {

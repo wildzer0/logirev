@@ -180,7 +180,9 @@ fn make_icon(size: i32) -> HICON {
     let rgba = crate::icon::draw_rgba(size as u32);
     // Windows wants BGRA.
     let pixels: Vec<u8> = rgba
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .flat_map(|p| [p[2], p[1], p[0], p[3]])
         .collect();
 
