@@ -98,8 +98,6 @@ thread_local! {
 
 /// Runs the tray application until the user picks "Quit" or logs off.
 pub fn run(opts: &ServiceOptions) -> ExitCode {
-    let config_path = opts.config.clone().unwrap_or_else(app::default_config_path);
-    let first_run = !config_path.exists();
     let prepared = match app::prepare(opts, false) {
         Ok(p) => p,
         Err(e) if e.contains("already running") && cfg!(feature = "gui") => {
@@ -121,7 +119,10 @@ pub fn run(opts: &ServiceOptions) -> ExitCode {
         }
     };
     match start(prepared, opts) {
-        Ok(()) if first_run && cfg!(feature = "gui") => open_settings(opts.config.as_deref()),
+        // Started by the user (not at log-in): show the window too.
+        Ok(()) if !opts.background && cfg!(feature = "gui") => {
+            open_settings(opts.config.as_deref())
+        }
         Ok(()) => {}
         Err(e) => {
             error!("{e}");

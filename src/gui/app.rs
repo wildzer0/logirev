@@ -18,7 +18,7 @@ use eframe::egui::{
 };
 
 use super::form::{dpi_slider, ActionForm, FormContext};
-use super::i18n::{fill, Lang, T};
+use super::i18n::{control_label, fill, Lang, T};
 use super::style::{self, icon, palette, ACCENT, BAD, GOOD};
 use crate::config::{
     BacklightMode, Match, RawAction, RawApp, RawBacklight, RawConfig, RawMacro, RawProfile,
@@ -659,7 +659,7 @@ impl SettingsApp {
                         .color(if c.remappable { ACCENT } else { pal.muted }),
                 );
                 ui.vertical(|ui| {
-                    ui.label(RichText::new(&c.label).strong());
+                    ui.label(RichText::new(control_label(t, &c.key, &c.label)).strong());
                     let summary = if !c.remappable {
                         format!("{} {}", icon::LOCK, t.not_remappable)
                     } else if app.is_some() && current.is_none() {
@@ -684,7 +684,7 @@ impl SettingsApp {
                                 kind,
                                 app,
                                 button_key: c.key.clone(),
-                                button_label: c.label.clone(),
+                                button_label: control_label(t, &c.key, &c.label).to_owned(),
                                 gestures: c.gestures,
                                 dpi_values: details.dpi_values.clone(),
                                 form: ActionForm::from_raw(current.as_ref()),

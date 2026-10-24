@@ -21,12 +21,17 @@ fn wide(s: &str) -> Vec<u16> {
 const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 const VALUE_NAME: &str = "logirev";
 
-/// The command Windows should run: this executable, plus `--config` when a
-/// non-default configuration file is in use.
+/// The command Windows should run: this executable in background mode (no
+/// window at log-in), plus `--config` when a non-default configuration file
+/// is in use.
 pub fn command_line(exe: &Path, config: Option<&Path>) -> String {
     match config {
-        Some(c) => format!("\"{}\" --config \"{}\"", exe.display(), c.display()),
-        None => format!("\"{}\"", exe.display()),
+        Some(c) => format!(
+            "\"{}\" --background --config \"{}\"",
+            exe.display(),
+            c.display()
+        ),
+        None => format!("\"{}\" --background", exe.display()),
     }
 }
 
@@ -114,10 +119,13 @@ mod tests {
     #[test]
     fn builds_command_lines() {
         let exe = Path::new(r"C:\Tools\logirev\logirev.exe");
-        assert_eq!(command_line(exe, None), r#""C:\Tools\logirev\logirev.exe""#);
+        assert_eq!(
+            command_line(exe, None),
+            r#""C:\Tools\logirev\logirev.exe" --background"#
+        );
         assert_eq!(
             command_line(exe, Some(Path::new(r"D:\cfg.toml"))),
-            r#""C:\Tools\logirev\logirev.exe" --config "D:\cfg.toml""#
+            r#""C:\Tools\logirev\logirev.exe" --background --config "D:\cfg.toml""#
         );
     }
 }

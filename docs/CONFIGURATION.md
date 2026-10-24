@@ -1,5 +1,10 @@
 # Configuration reference
 
+> **Most people never need this file:** everything here can be set from the
+> logirev window (left-click the icon next to the clock). This page is for
+> those who prefer editing text, or want the details. Note that the window
+> rewrites the file when it saves, so comments you add by hand are not kept.
+
 logirev is configured with one text file, **`logirev.toml`**, which sits next
 to the program. It is created automatically, with explanations, the first
 time logirev starts. Open it with any text editor (Notepad is fine).

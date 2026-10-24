@@ -113,6 +113,26 @@ Change buttons one at a time (save after each) and try them.
 | K7 | Macro with `{ press = "Shift" }, { click = "left" }` (no release) | Shift is released at the end (no stuck Shift). |
 | K8 | Backlit keyboard only: `backlight = { mode = "manual", level = 2 }` and a `backlight` action | Light level changes. |
 
+## L. Settings window (1.0)
+
+| # | Do | Expect |
+|---|---|---|
+| L1 | First start: unzip into a new folder, double-click `logirev.exe` | Tray icon appears **and** the window opens on *Devices*. |
+| L2 | Close the window, double-click `logirev.exe` again | The window opens again (no "already running" message); only one tray icon. |
+| L3 | Left-click the tray icon | The window opens (or comes to the front if already open). |
+| L4 | *Devices* page | Cards for each paired slot; connected ones show battery icon and %; asleep ones are faded. |
+| L5 | Click *MX Ergo S* → *Buttons* → *Change* on Back → *Keyboard shortcut* → *Record*, press Ctrl+Shift+T → *Save* | Row shows "Ctrl + Shift + T"; within ~2 s Back reopens the last closed browser tab. |
+| L6 | *Pointer & wheel*: untick "Keep the device's own value", move the DPI slider | Pointer speed changes a second later. |
+| L7 | *Per program*: pick a running program, change a button for it | Works only while that program is in front. |
+| L8 | *Computers* (device paired to 2 computers): *Switch* | Device moves to the other computer. |
+| L9 | *Macros*: *New macro*, edit steps; assign it to a button with the *Macro* action | The button runs the steps. |
+| L10 | *Settings*: Italiano / English, Light / Dark | The window changes language / look immediately. |
+| L11 | *Settings*: tick *Start with Windows*, sign out and in | Tray icon appears, **no** window opens. |
+| L12 | *Settings*: *Stop service* | Window shows "Service not running" with *Start*; *Start* brings it back. |
+| L13 | Quit from the tray while the window is open | The window switches to "Service not running". |
+| L14 | Task Manager | `logirev.exe` (service) a few MB; the window process exits when closed. |
+| L15 | Explorer | `logirev.exe` shows the new round blue icon. |
+
 ## J. Command-line tools
 
 | # | Do | Expect |

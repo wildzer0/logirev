@@ -1,193 +1,96 @@
 # logirev
 
-**A tiny program that sets up your Logitech mouse, trackball or keyboard —
-without installing Logi Options+.**
+**Set up your Logitech mouse, trackball or keyboard — without Logi
+Options+.** A small, portable app: unzip it, double-click it, done.
+
+![Your devices](docs/images/devices.png)
 
 It works with devices connected through a **Logi Bolt** or **Unifying**
-receiver (the small USB "dongle"), and with devices connected directly by
+receiver (the small USB "dongle") and with devices connected directly by
 cable or Bluetooth. It was built and tested with an **MX Ergo S** trackball.
 
-- **Portable:** two small programs and one text file. No installation, no
-  account, no internet, no telemetry. Works from a USB stick.
-- **Light:** about 3 MB of memory and no noticeable CPU use.
-- **Plug & play:** plug in the receiver or wake up the device and its
-  settings are applied by themselves.
-- Remap buttons to **shortcuts**, **mouse clicks**, **scrolling**,
-  **programs**, **macros** (also repeating while held), **gestures** (hold a
-  button and move), **screen brightness**, **keyboard backlight** or
-  **switching computer** (Easy-Switch) — one device or all of them together.
-- **Easy-Switch from the icon menu:** *Send MX Ergo S to ▸ Computer 2*.
-- **Different buttons in different programs** (Windows), e.g. the side
-  buttons do *undo / redo* only in Photoshop.
-- A **slow mode** button for precise work, or a button that **cycles DPI**.
-- Set **DPI / speed**, the **scroll wheel**, **SmartShift**, the **thumb
-  wheel**; on keyboards the **backlight**, the **Fn keys** and **disabling
-  Caps Lock** & co.
-- An **icon next to the clock** (Windows) showing your devices and their
-  battery, with a *Start with Windows* option, and a **warning when a
-  battery is low**.
-- A **log file** that never grows beyond 1 MB, and an optional recording of
-  the traffic that you can open in **Wireshark**.
+## What it does
 
-> **Status:** version 0.3. Developed with an MX Ergo S on a Bolt receiver on
-> Windows; features of other devices (MX Master wheels, keyboards) follow
-> Logitech's protocol but have not been tried on real hardware yet.
+- **Choose what every button does** — keyboard shortcuts (just press them to
+  record), mouse clicks, scrolling, opening programs, macros, gestures (hold
+  a button and move), screen brightness, keyboard backlight, switching to
+  another computer.
+- **Different buttons in different programs** — e.g. the side buttons do
+  *undo / redo* only in Photoshop.
+- **Speed and wheel** — DPI, precision mode, SmartShift, scroll direction.
+- **Keyboards** — F-keys or media keys, disable Caps Lock & co., backlight.
+- **Easy-Switch** — send a device (or all of them together) to another
+  computer, from the app or with a button.
+- **Battery at a glance**, and a **notification when it gets low**.
+- **Plug & play** — devices are set up the moment they connect or wake up.
+- **Light** — the background part uses just a few MB of memory and no
+  CPU while idle; the window only runs while it is open.
+- **Portable and private** — no installation, no account, no internet, no
+  telemetry. Works from a USB stick. English and Italian.
+
+| Customise a device | Change a button |
+|---|---|
+| ![Device page](docs/images/device.png) | ![Button editor](docs/images/editor.png) |
 
 ---
 
 ## Contents
 
-1. [Download](#download)
-2. [Getting started on Windows](#getting-started-on-windows)
-3. [Getting started on Linux](#getting-started-on-linux)
-4. [Changing the settings](#changing-the-settings)
-5. [Questions and answers](#questions-and-answers)
-6. [When something does not work](#when-something-does-not-work)
-7. [What's next](#whats-next)
-8. [More documentation](#more-documentation)
-
----
-
-## Download
-
-Open the **Releases** page of this repository and download:
-
-- **Windows:** `logirev-<version>-windows-x64.zip`
-- **Linux:** `logirev-<version>-linux-x64.tar.gz`
-
-Unpack it into any folder you like, for example `C:\Tools\logirev\`. Inside
-you will find:
-
-| File | What it is |
-|---|---|
-| `logirev` (`logirev.exe`) | the program that runs in the background and keeps your devices set up |
-| `logirevctl` (`logirevctl.exe`) | a helper to look at your devices and solve problems |
-| `logirev.example.toml` | an example of the settings file |
-| `README.md`, `docs/` | this guide and the detailed documentation |
-| `LICENSE.md` | the terms of use (free for non-commercial use) |
-| `tools/` | Wireshark plugin and (Linux) permission rules |
+1. [Getting started on Windows](#getting-started-on-windows)
+2. [Using the app](#using-the-app)
+3. [Questions and answers](#questions-and-answers)
+4. [When something does not work](#when-something-does-not-work)
+5. [Linux](#linux)
+6. [More documentation](#more-documentation)
+7. [License](#license)
 
 ---
 
 ## Getting started on Windows
 
-1. **Quit Logi Options+** if you have it (right-click its icon near the
-   clock → *Quit*). Two programs cannot control the same device at the same
-   time.
+1. **Download** `logirev-<version>-windows-x64.zip` from the **Releases**
+   page of this repository and unzip it into a folder that will stay where
+   it is, for example `C:\Tools\logirev\`.
+2. **Quit Logi Options+** if you have it (right-click its icon next to the
+   clock → *Quit*): two programs cannot control the same device.
+3. **Double-click `logirev.exe`.** The logirev window opens and shows your
+   devices. A blue round icon also appears next to the clock: that is the
+   part that keeps your devices set up in the background.
 
-2. **Look at your devices.** Open the folder, click the address bar, type
-   `cmd` and press Enter. In the black window type:
+That's it. To make it start by itself every time you turn the computer on,
+open *Settings* in the app and tick **Start with Windows**.
 
-   ```
-   logirevctl scan
-   ```
-
-   You will see your receiver, the devices paired to it (up to 6) and, for
-   each device that is awake, what it can do:
-
-   ```
-   === Bolt receiver (046d:c548)
-
-   [slot 2] MX Ergo S  (trackball, HID++ 4.5)
-     firmware       RBM 26.01.B0013
-     battery        30%
-     dpi            750
-     profile        "MX Ergo"
-     buttons (config name, id, remappable, default task):
-       middle           0x0052  yes, mouse button   ...
-       back             0x0053  yes, mouse button   ...
-       precision        0x00fd  yes, mouse button   ...
-   ```
-
-   A device that is asleep does not answer: move it and run the command again.
-
-3. **Start logirev:** double-click `logirev.exe`. No window opens: a small
-   blue round **icon appears next to the clock**. (If you do not see it,
-   click the `^` arrow next to the clock: Windows may have hidden it there.
-   You can drag it next to the clock to keep it always visible.)
-
-   The first time, logirev creates **`logirev.toml`** — your settings — in
-   the same folder, already prepared for the MX Ergo / MX Ergo S.
-
-4. **Use the icon.** Hover it to see your connected devices and their
-   battery. **Left-click** opens the *devices* window (all paired devices,
-   connected or not, with battery, DPI and profile). **Right-click** opens
-   the menu:
-
-   | Menu item | What it does |
-   |---|---|
-   | *Slot 1, Slot 2...* | your paired devices; a tick ✓ means connected |
-   | *Show devices...* | opens the devices window |
-   | *Edit settings* | opens `logirev.toml` in your text editor |
-   | *Reload settings* | applies the settings now (they also apply by themselves when you save) |
-   | *Open log* | opens `logirev.log` |
-   | *Open logirev folder* | opens the folder in Explorer |
-   | *Start with Windows* | tick it to start logirev automatically when you log in |
-   | *Quit* | stops logirev; your buttons go back to normal |
-
-   When something needs your attention (for example a mistake in the
-   settings file) a notification appears.
-
-> Put the logirev folder somewhere permanent (e.g. `C:\Tools\logirev\`)
-> before ticking *Start with Windows*. If you move it later, just start it
-> once from the new place: the start-up entry follows it.
+> If you don't see the icon next to the clock, click the `^` arrow there:
+> Windows may have tucked it away. You can drag it next to the clock.
 
 ---
 
-## Getting started on Linux
+## Using the app
 
-1. Unpack the archive and open a terminal in that folder.
-2. Allow your user to talk to the receiver and to simulate key presses:
+Open it with a **left-click on the icon** next to the clock (or by
+double-clicking `logirev.exe` again).
 
-   ```bash
-   sudo cp tools/42-logirev.rules /etc/udev/rules.d/
-   sudo udevadm control --reload && sudo udevadm trigger
-   ```
+- **Devices** — all devices paired with your receivers (up to 6 per
+  receiver), with battery and status. Click a connected one to customise it:
+  - **Buttons**: click *Change* next to a button and pick an action. For a
+    shortcut, click *Record* and press it.
+  - **Pointer & wheel**: speed (DPI) and wheel options.
+  - **Keyboard**: F-keys, keys to disable, backlight.
+  - **Per program**: add a program (or pick one that is running) and give
+    buttons a different job while it is in front.
+  - **Computers**: send the device to another computer (Easy-Switch).
+- **Macros** — lists of steps (shortcuts, text, clicks, pauses) that a
+  button can run.
+- **Settings** — language, light or dark look, *Start with Windows*,
+  battery warning.
 
-   To let the `brightness` action change a laptop screen, also run
-   `sudo usermod -aG video $USER`. Unplug and re-plug the receiver, then log
-   out and back in.
-3. Quit Solaar if it is running.
-4. Look at your devices: `./logirevctl scan`
-5. Create the settings file and start at every log-in:
+Changes are **saved and applied immediately**; there is no "save" button.
+Closing the window does not stop logirev: the icon next to the clock keeps
+working. Right-click it for more options, including *Quit*.
 
-   ```bash
-   ./logirevctl init
-   ./logirevctl install-service
-   systemctl --user daemon-reload && systemctl --user enable --now logirev.service
-   ```
-
-   To try it in the terminal instead: `./logirev` (Ctrl+C to stop).
-
----
-
-## Changing the settings
-
-Open `logirev.toml` with any text editor (Notepad is fine). It explains
-itself with comments. Save the file and **the new settings are applied in a
-couple of seconds** — no restart needed. If you make a typo, logirev keeps
-the previous settings and tells you what is wrong in its window and in
-`logirev.log`.
-
-A typical profile looks like this:
-
-```toml
-[[profile]]
-name = "MX Ergo"
-match = { name = "MX Ergo", kind = "trackball" }   # which devices it is for
-dpi = 750                                           # speed
-
-[profile.buttons]
-back      = { action = "keys", keys = "Alt+Left" }        # browser back
-tilt_left = { action = "keys", keys = "Ctrl+Shift+Tab" }  # previous tab
-precision = { action = "toggle-dpi", dpi = 400 }          # slow mode on/off
-```
-
-You can write several profiles — for example one for your trackball and one
-for "any other mouse" — and each device gets the first profile that fits it.
-
-Every setting, button name, action and key name is listed in
-**[docs/CONFIGURATION.md](docs/CONFIGURATION.md)**.
+| | |
+|---|---|
+| ![Settings](docs/images/settings.png) | Everything is also stored in a plain text file, `logirev.toml`, next to the program. You never need to open it, but you can: see [docs/CONFIGURATION.md](docs/CONFIGURATION.md). |
 
 ---
 
@@ -199,28 +102,14 @@ preferences: each time they sleep or are switched off they return to factory
 behaviour. logirev notices when the device comes back and sends the settings
 again, within a fraction of a second. Logi Options+ does exactly the same.
 
-**How many devices can I use?** A Bolt or Unifying receiver holds up to **6**
-paired devices. logirev serves all of them, and several receivers at once.
+**Does it slow my computer down?** No. The background part sleeps until a
+device sends something and uses just a few MB of memory.
 
-**Does it slow my computer down?** No. It sleeps until a device sends
-something; it uses about 3 MB of memory.
+**How many devices can I use?** Up to 6 per receiver, and several receivers
+at once.
 
-**Does a window have to stay open?** No. On Windows logirev lives in the
-icon next to the clock; on Linux it runs as a background service.
-
-**Can it start by itself when I log in?** Yes: tick *Start with Windows* in
-the icon menu. On Linux, see step 5 of the Linux instructions.
-
-**Can buttons do different things in different programs?** Yes (on
-Windows): see [per-program buttons](docs/CONFIGURATION.md#6-different-buttons-in-different-programs-windows).
-
-**Will it tell me when the battery is low?** Yes: a notification appears
-when a battery drops to 15% (change it with `battery_warning`).
-
-**What happens when I quit logirev?** It gives the buttons back to the
-device, so everything works as without logirev.
-
-**Can I use `logirevctl scan` while logirev is running?** Yes.
+**What happens when I quit logirev?** Your devices go back to their normal
+behaviour.
 
 **Is it safe?** logirev only changes temporary settings. It never writes to
 the device's permanent memory or firmware: switching the device off always
@@ -235,28 +124,49 @@ brings back the factory behaviour.
 
 | What you see | What to do |
 |---|---|
-| `No Logitech HID++ interface found` | Is the receiver plugged in? On Linux, install the permission rules (step 2). |
-| `cannot open ...` | Quit Logi Options+ / Solaar. On Linux, check the permission rules. |
-| `logirev is already running` | logirev is already open: look for its icon next to the clock (or behind the `^` arrow). |
-| No icon appears | Click the `^` arrow next to the clock. If it is not there either, start `logirevctl run` in a terminal to see why. |
-| The device is not listed by `scan` | It is asleep: move it or press a button, then retry. |
-| `button ... cannot be remapped` | That button cannot be changed on this device; pick another one. |
-| A remapped button does nothing | Quit logirev from its icon, then run `logirevctl run --log-level debug` in a terminal and look for `button ... pressed`. |
-| Shortcuts do not reach a program on Windows | Windows blocks simulated keys in programs started "as administrator", unless logirev is started as administrator too. |
-| Linux: `cannot open /dev/uinput` | Install the permission rules and log in again. |
+| The app says *Service not running* | Click *Start*. If it stops again, see the log (*Settings → Open log*). |
+| *No receiver found* | Is the receiver plugged in? Quit Logi Options+ and try again. |
+| A device shows *Not connected* | It is asleep: move it or press a key. |
+| A button is marked *Cannot be changed* | The device does not allow changing that button. |
+| A shortcut does not reach a program | Windows blocks simulated keys in programs started "as administrator", unless logirev is started as administrator too. |
+| The screen brightness action does nothing | Enable "DDC/CI" in your monitor's on-screen menu. |
 
-If you report a problem, attach `logirev.log` and, if possible, a capture:
-quit logirev, run `logirevctl run --pcap logirev.pcap`, reproduce the
-problem, press Ctrl+C.
+To report a problem, attach `logirev.log` (*Settings → Open log*). For
+advanced diagnostics there is `logirevctl.exe`, a command-line tool:
+`logirevctl scan` lists everything the devices report, and
+`logirevctl run --log-level debug --pcap logirev.pcap` records the traffic
+for Wireshark (quit logirev first).
 
 ---
 
-## What's next
+## Linux
 
-Ideas for later versions:
+The Linux download runs the background service without a window (the app
+window can be built from source with `cargo build --release`).
 
-- per-program buttons on Linux;
-- editing buttons from the devices window instead of the text file.
+1. Unpack the archive and open a terminal in that folder.
+2. Allow your user to talk to the receiver and to simulate key presses:
+
+   ```bash
+   sudo cp tools/42-logirev.rules /etc/udev/rules.d/
+   sudo udevadm control --reload && sudo udevadm trigger
+   ```
+
+   For the brightness action on laptops also run
+   `sudo usermod -aG video $USER`. Unplug and re-plug the receiver, then log
+   out and back in.
+3. Quit Solaar if it is running, then look at your devices: `./logirevctl scan`
+4. Create the settings file and start at every log-in:
+
+   ```bash
+   ./logirevctl init
+   ./logirevctl install-service
+   systemctl --user daemon-reload && systemctl --user enable --now logirev.service
+   ```
+
+   Settings are edited in `logirev.toml` (see
+   [docs/CONFIGURATION.md](docs/CONFIGURATION.md)) and applied as soon as
+   the file is saved.
 
 ---
 
@@ -264,7 +174,7 @@ Ideas for later versions:
 
 | Document | For whom |
 |---|---|
-| [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | everyone: every setting explained |
+| [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | the settings file, every option explained |
 | [docs/PROTOCOL.md](docs/PROTOCOL.md) | the curious: how logirev talks to the device |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | developers: building, code layout, releasing |
 | [docs/TESTING.md](docs/TESTING.md) | testers: the checklist used before each release |
@@ -278,7 +188,7 @@ logirev is free for **personal and non-commercial use**: you may use it,
 study it, change it and share it, as long as it is not for a commercial
 purpose. Charities, schools, research and public institutions may use it too.
 See [LICENSE.md](LICENSE.md) (PolyForm Noncommercial 1.0.0) for the exact
-terms.
+terms. Icons: [Phosphor Icons](https://phosphoricons.com) (MIT).
 
 logirev is an independent project, not affiliated with or endorsed by
 Logitech. "Logitech", "Logi", "Bolt", "Unifying" and "MX" are trademarks of

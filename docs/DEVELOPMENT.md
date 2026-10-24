@@ -13,6 +13,7 @@ cargo build --release                 # target/release/logirev{,ctl}
 cargo test                            # unit tests, no hardware needed
 cargo fmt --check                     # formatting
 cargo clippy --all-targets -- -D warnings
+cargo clippy --all-targets --no-default-features -- -D warnings   # without the window
 cargo clippy --all-targets --target x86_64-pc-windows-msvc -- -D warnings   # Windows lints from Linux
 cargo build --release --target x86_64-unknown-linux-musl                    # fully static Linux binary
 ```
@@ -46,6 +47,9 @@ Both are thin wrappers around the library in `src/lib.rs`.
 | `src/status.rs` | snapshots and notices the daemon sends to the interface |
 | `src/foreground.rs` | foreground-program watcher (WinEvent hook) for per-program buttons |
 | `src/brightness.rs` | screen brightness: DDC/CI (dxva2), WMI fallback, Linux backlight |
+| `src/ipc.rs` | local channel service ↔ settings window (127.0.0.1 + secret, JSON lines) |
+| `src/icon.rs` | the application icon drawn in code, `.ico` encoder (used by `build.rs`) |
+| `src/gui/` | settings window (egui/eframe, feature `gui`): `app.rs` pages, `form.rs` action editor, `style.rs` theme and icons, `i18n.rs` texts |
 | `src/ui/view.rs` | content of the tray menu and device window (portable, tested) |
 | `src/ui/windows/` | Win32 tray icon, menu, device window, autostart, device notifications |
 | `build.rs`, `res/logirev.manifest` | Windows manifest (Common Controls 6, per-monitor DPI) embedded at link time |
@@ -92,6 +96,34 @@ held across nested message loops (menus, message boxes).
 The protocol itself is described in plain language in
 [PROTOCOL.md](PROTOCOL.md).
 
+## The settings window
+
+`logirev --settings` runs [eframe](https://github.com/emilk/egui) with the
+glow (OpenGL) renderer in its own process. It connects to the service
+through `ipc::Client` (port and secret in
+`%LOCALAPPDATA%\logirev\service.json`), shows `status::Snapshot`s and
+edits `config::RawConfig`, which it saves 600 ms after the last change
+(`RawConfig::save` validates first and writes atomically); the service picks
+the file up by itself and the window also sends `Reload`.
+
+Device edits go to a profile matching the device's exact name, created on
+the first change as a copy of the profile that applied before.
+
+To see the window without hardware (also on Linux/WSLg):
+
+```bash
+LOGIREV_DEMO=1 cargo run -- --settings            # sample devices
+LOGIREV_DEMO=1 LOGIREV_PAGE=editor \
+  EFRAME_SCREENSHOT_TO=shot.png cargo run --features screenshot -- --settings
+```
+
+`LOGIREV_PAGE` can be `devices`, `device`, `pointer`, `computers`,
+`editor`, `macros`, `settings`, `about`. The screenshots in `docs/images`
+are made this way.
+
+New texts go into the `texts!` table of `src/gui/i18n.rs` (English and
+Italian side by side; a missing translation does not compile).
+
 ## Adding a setting or a feature
 
 Nothing is hard-coded per model: devices are identified by name and kind and
@@ -102,7 +134,9 @@ their features are discovered at runtime. To support a new setting:
 2. add the field to `RawProfile` / `Profile` in `src/config.rs`, with
    validation and a test;
 3. apply it in `apply_settings` in `src/daemon.rs`;
-4. show it in `scan_device` in `src/bin/logirevctl.rs`;
+4. show it in `scan_device` in `src/bin/logirevctl.rs`, publish what the
+   window needs in `status::DeviceDetails` (`collect_details` in
+   `daemon.rs`) and add the control to `src/gui/app.rs`;
 5. document it in `docs/CONFIGURATION.md` and `config/logirev.toml`.
 
 ## Releasing

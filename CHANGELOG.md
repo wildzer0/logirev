@@ -3,9 +3,29 @@
 All notable changes are listed here. Versions follow
 [Semantic Versioning](https://semver.org).
 
-## [0.4.0] — unreleased
+## [1.0.0] — unreleased
 
 ### Added
+- **Settings window** (`logirev --settings`, opened by the tray icon, by
+  starting `logirev.exe` by hand, and on first run): every device with
+  battery and status; per-device pages for buttons (action editor with a
+  shortcut recorder), pointer and wheel, keyboard, per-program buttons
+  (pick from running programs) and Easy-Switch computers; macro editor;
+  settings (language, light/dark theme, start with Windows, battery
+  warning, log level). Changes are saved and applied automatically.
+- English and Italian interface, following the system language.
+- New application icon (stylised trackball), also embedded in the `.exe`.
+- Local channel between the service and the window (127.0.0.1 + secret).
+- `--background` flag (used by *Start with Windows*: no window at log-in).
+- Demo mode for the window (`LOGIREV_DEMO=1`), used for screenshots.
+
+### Changed
+- The configuration file is rewritten by the window (comments of a
+  hand-written file are not kept).
+- Minimum Rust version 1.95 (required by the window toolkit).
+- The Linux download has no window (static build); build from source for it.
+
+### Added in the 0.4 development line
 - Keyboard backlight (feature 0x1982): `backlight` profile setting
   (`off`, `on`, `auto`, `manual` + `level`) and `backlight` action
   (`up`, `down`, `toggle`).
@@ -19,7 +39,7 @@ All notable changes are listed here. Versions follow
   `press` / `release` steps to hold keys; `repeat = <ms>` repeats a macro or
   sequence while the button is held.
 
-## [0.3.0] — unreleased
+## [0.3.0] — 2026-10-24
 
 ### Added
 - Windows: `logirev.exe` runs without a console window and shows an icon in

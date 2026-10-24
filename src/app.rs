@@ -33,6 +33,8 @@ pub struct ServiceOptions {
     pub log_level: Option<String>,
     /// Overrides `[logging] pcap`.
     pub pcap: Option<PathBuf>,
+    /// Started automatically (at log-in): do not open the settings window.
+    pub background: bool,
 }
 
 /// Everything the daemon needs, ready to go.

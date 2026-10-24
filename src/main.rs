@@ -43,6 +43,10 @@ struct Cli {
     /// Open the settings window instead of starting the service
     #[arg(long)]
     settings: bool,
+
+    /// Start without opening the settings window (used at log-in)
+    #[arg(long)]
+    background: bool,
 }
 
 /// Opens the settings window, if this build has one.
@@ -63,6 +67,7 @@ impl Cli {
             config: self.config,
             log_level: self.log_level,
             pcap: self.pcap,
+            background: self.background,
         }
     }
 }
