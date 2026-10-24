@@ -977,7 +977,7 @@ impl SettingsApp {
                         .color(if c.remappable { ACCENT } else { pal.muted }),
                 );
                 ui.vertical(|ui| {
-                    ui.label(RichText::new(control_label(t, &c.key, &c.label)).strong());
+                    ui.label(RichText::new(control_label(t, c.cid)).strong());
                     let summary = if !c.remappable {
                         format!("{} {}", icon::LOCK, t.not_remappable)
                     } else if app.is_some() && current.is_none() {
@@ -1002,7 +1002,7 @@ impl SettingsApp {
                                 kind,
                                 app,
                                 button_key: c.key.clone(),
-                                button_label: control_label(t, &c.key, &c.label).to_owned(),
+                                button_label: control_label(t, c.cid),
                                 gestures: c.gestures,
                                 dpi_values: details.dpi_values.clone(),
                                 form: ActionForm::from_raw(current.as_ref()),

@@ -479,7 +479,8 @@ fn scan_device(t: &mut Transport, slot: u8, cfg: Option<&Config>) {
         match dev.controls() {
             Ok(controls) => {
                 for c in controls {
-                    let (alias, desc) = control_name(c.cid).unwrap_or(("", ""));
+                    let alias = control_name(c.cid).map_or("", |(a, _)| a);
+                    let desc = logirev::hidpp::controls::name(c.cid, false).unwrap_or("");
                     let alias = if alias.is_empty() {
                         format!("\"{:#06x}\"", c.cid)
                     } else {

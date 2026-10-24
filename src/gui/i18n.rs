@@ -55,22 +55,9 @@ fn system_language() -> Lang {
     }
 }
 
-/// The localised name of a button, from its configuration alias.
-pub fn control_label<'a>(t: &'a T, key: &str, fallback: &'a str) -> &'a str {
-    match key {
-        "left" => t.ctl_left,
-        "right" => t.ctl_right,
-        "middle" => t.ctl_middle,
-        "back" => t.ctl_back,
-        "forward" => t.ctl_forward,
-        "tilt_left" => t.ctl_tilt_left,
-        "tilt_right" => t.ctl_tilt_right,
-        "gesture" => t.ctl_gesture,
-        "smartshift" => t.ctl_smartshift,
-        "virtual_gesture" => t.ctl_virtual_gesture,
-        "precision" | "dpi_switch" => t.ctl_precision,
-        _ => fallback,
-    }
+/// The localised name of button `cid` ("Tasto 0x0123" when unknown).
+pub fn control_label(t: &T, cid: u16) -> String {
+    crate::hidpp::controls::name_or_number(cid, std::ptr::eq(t, &IT))
 }
 
 /// Replaces each `{}` in `text` with the next value.
@@ -169,17 +156,6 @@ texts! {
     device_gone => "This device is no longer connected.", "Questa periferica non è più connessa.";
 
     // Button names
-    ctl_left => "Left click", "Clic sinistro";
-    ctl_right => "Right click", "Clic destro";
-    ctl_middle => "Middle button (wheel click)", "Tasto centrale (clic della rotella)";
-    ctl_back => "Back", "Indietro";
-    ctl_forward => "Forward", "Avanti";
-    ctl_tilt_left => "Wheel tilt left", "Rotella inclinata a sinistra";
-    ctl_tilt_right => "Wheel tilt right", "Rotella inclinata a destra";
-    ctl_gesture => "Gesture button", "Tasto gesture";
-    ctl_smartshift => "Wheel mode button", "Tasto modalità rotella";
-    ctl_virtual_gesture => "Virtual gesture button", "Tasto gesture virtuale";
-    ctl_precision => "Precision mode button", "Tasto modalità precisione";
 
     // Buttons tab
     buttons_hint => "Choose what each button does. \"Default\" keeps the button's normal behaviour.",

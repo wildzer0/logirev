@@ -1684,10 +1684,11 @@ fn collect_details(
         controls: controls
             .iter()
             .map(|c| {
-                let (key, label) = match control_name(c.cid) {
-                    Some((alias, desc)) => (alias.to_owned(), desc.to_owned()),
-                    None => (format!("{:#06x}", c.cid), format!("Button {:#06x}", c.cid)),
+                let key = match control_name(c.cid) {
+                    Some((alias, _)) => alias.to_owned(),
+                    None => format!("{:#06x}", c.cid),
                 };
+                let label = crate::hidpp::controls::name_or_number(c.cid, false);
                 ControlInfo {
                     cid: c.cid,
                     key,

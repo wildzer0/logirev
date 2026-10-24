@@ -3,6 +3,15 @@
 All notable changes are listed here. Versions follow
 [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Fixed
+- **Pairing a Bolt keyboard**: the device list no longer grows forever when
+  the keyboard announces itself repeatedly; the list scrolls.
+- **Device list**: cards wrap onto several rows instead of being cut off.
+- **Keyboard keys** are shown by name (e.g. "Play / Pause", "Emoji",
+  "Backlight up") in English and Italian, instead of a hexadecimal number.
+
 ## [1.1.0] — 2026-10-24
 
 ### Added
