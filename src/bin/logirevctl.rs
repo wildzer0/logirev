@@ -5,7 +5,8 @@
 //! * `list` — show the raw HID++ interfaces found on the system;
 //! * `init` — write a commented default configuration file;
 //! * `run` — run the service in this terminal (same as `logirev`);
-//! * `install-service` — start logirev at log-in (Linux, systemd).
+//! * `install-service` — start logirev at log-in (Linux, systemd);
+//! * `pair` / `unpair <slot>` — add a device to the receiver / remove one.
 //!
 //! `scan` uses its own HID++ software id, so it works while the service is
 //! running.
@@ -23,6 +24,7 @@ use logirev::hidpp::features::{
     control_name, feature_name, id, Device, FeatureTable, DISABLE_KEY_NAMES,
 };
 use logirev::hidpp::frame::RECEIVER_INDEX;
+use logirev::hidpp::pairing::{mouse_clicks, unpair, Family, Pairing, Stage};
 use logirev::hidpp::receiver::{paired_devices, MAX_SLOTS};
 use logirev::hidpp::transport::{self, Transport};
 use logirev::{logging, service};
@@ -68,6 +70,13 @@ enum Cmd {
     Run,
     /// Start logirev automatically at log-in (Linux: systemd user service)
     InstallService,
+    /// Pair a new device with the receiver
+    Pair,
+    /// Remove the device in SLOT (1-6, see `scan`) from the receiver
+    Unpair {
+        /// Receiver slot of the device to remove
+        slot: u8,
+    },
 }
 
 fn main() -> ExitCode {
@@ -85,6 +94,8 @@ fn main() -> ExitCode {
         Cmd::List => console_logging(&cli).and_then(|()| cmd_list()),
         Cmd::Init { force } => cmd_init(&config_path, *force),
         Cmd::InstallService => cmd_install_service(&config_path),
+        Cmd::Pair => console_logging(&cli).and_then(|()| cmd_pair(&cli)),
+        Cmd::Unpair { slot } => console_logging(&cli).and_then(|()| cmd_unpair(&cli, *slot)),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -136,6 +147,121 @@ fn cmd_install_service(config_path: &Path) -> Result<(), String> {
         "now run:  systemctl --user daemon-reload && systemctl --user enable --now {}",
         service::UNIT_NAME
     );
+    Ok(())
+}
+
+/// Opens the first receiver that can pair devices (Bolt or Unifying).
+fn open_pairing_receiver(cli: &Cli) -> Result<Transport, String> {
+    let api = HidApi::new().map_err(|e| e.to_string())?;
+    let groups = transport::group_devices(&transport::enumerate(&api));
+    let (_, collections) = groups
+        .into_iter()
+        .find(|(_, c)| Family::of(c[0].pid).is_some())
+        .ok_or("no Bolt or Unifying receiver found")?;
+    let pcap = app::open_pcap(cli.pcap.as_deref(), 10 * 1024 * 1024)?;
+    Transport::open(&api, &collections, CLI_SOFTWARE_ID, pcap, None)
+        .map_err(|e| format!("{e} (close Logi Options+ and retry)"))
+}
+
+fn cmd_pair(cli: &Cli) -> Result<(), String> {
+    let mut t = open_pairing_receiver(cli)?;
+    // The receiver must report connections (the service also enables this).
+    if let Ok(flags) = t.read_register(0x00, &[]) {
+        if flags.len() >= 3 {
+            let _ = t.write_register(0x00, &[flags[0], flags[1] | 0x09, flags[2]]);
+        }
+    }
+    let known: Vec<u8> = paired_devices(&mut t).iter().map(|p| p.slot).collect();
+    let mut pairing =
+        Pairing::start(&mut t, known).map_err(|e| format!("cannot start pairing: {e}"))?;
+    println!("{}: pairing mode on.", t.name);
+    match pairing.family {
+        Family::Unifying => {
+            println!("Turn the device on, or press its connect button, within 30 seconds.")
+        }
+        Family::Bolt => println!(
+            "Press and hold the device's connect / Easy-Switch button until it blinks fast (30 s)."
+        ),
+    }
+
+    let mut shown = 0usize;
+    let mut last_stage = pairing.stage.clone();
+    loop {
+        match t.next_event(std::time::Duration::from_millis(500)) {
+            Some(transport::Incoming::Frame(f)) => {
+                pairing.on_frame(&f);
+            }
+            Some(transport::Incoming::Lost(e)) => return Err(format!("receiver lost: {e}")),
+            None => {}
+        }
+        pairing.check_timeout();
+        // Bolt: report found devices; pair the first complete one.
+        if pairing.family == Family::Bolt && pairing.stage == Stage::Waiting {
+            for f in &pairing.found[shown..] {
+                println!(
+                    "Found: {} ({})",
+                    f.name.as_deref().unwrap_or("unnamed device"),
+                    f.kind
+                );
+            }
+            shown = pairing.found.len();
+            if let Some(i) = pairing
+                .found
+                .iter()
+                .position(|f| f.address != [0; 6] && f.name.is_some())
+            {
+                pairing
+                    .choose(&mut t, i)
+                    .map_err(|e| format!("cannot pair: {e}"))?;
+                println!("Pairing...");
+            }
+        }
+        if pairing.stage != last_stage {
+            last_stage = pairing.stage.clone();
+            match &pairing.stage {
+                Stage::Passkey {
+                    passkey,
+                    keyboard: true,
+                    ..
+                } => {
+                    println!("On the keyboard, type {passkey} and press Enter.");
+                }
+                Stage::Passkey {
+                    passkey,
+                    keyboard: false,
+                    ..
+                } => {
+                    let clicks: Vec<&str> = mouse_clicks(passkey)
+                        .iter()
+                        .map(|r| if *r { "right" } else { "left" })
+                        .collect();
+                    println!("On the mouse, click: {}", clicks.join(", "));
+                    println!("then press the left and right buttons together.");
+                }
+                Stage::Paired { slot } => {
+                    println!("Paired in slot {slot}.");
+                    return Ok(());
+                }
+                Stage::Failed { reason } => return Err(format!("pairing failed: {reason}")),
+                Stage::Cancelled => return Err("pairing cancelled".into()),
+                Stage::Waiting | Stage::Pairing => {}
+            }
+        }
+    }
+}
+
+fn cmd_unpair(cli: &Cli, slot: u8) -> Result<(), String> {
+    if !(1..=MAX_SLOTS).contains(&slot) {
+        return Err(format!("slot must be between 1 and {MAX_SLOTS}"));
+    }
+    let mut t = open_pairing_receiver(cli)?;
+    let name = paired_devices(&mut t)
+        .into_iter()
+        .find(|p| p.slot == slot)
+        .and_then(|p| p.name)
+        .unwrap_or_else(|| format!("slot {slot}"));
+    unpair(&mut t, slot).map_err(|e| format!("cannot remove {name}: {e}"))?;
+    println!("Removed {name} from {}.", t.name);
     Ok(())
 }
 

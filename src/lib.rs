@@ -17,6 +17,7 @@
 //! | [`app`] | starting the service (config, logs, single instance, Ctrl+C) |
 //! | `autostart` | "Start with Windows" (Windows only) |
 //! | [`brightness`] | screen brightness (DDC/CI, WMI, Linux backlight) |
+//! | [`guides`] | the guides of `docs/`, included in this documentation |
 //! | [`daemon`] | the event loop: connections, profiles, button events, actions |
 //! | [`config`] | reading and validating `logirev.toml` |
 //! | [`foreground`] | which program is in front (per-application buttons) |
@@ -34,6 +35,27 @@
 //! | [`service`] | start-at-login integration |
 //! | [`status`] | what the service reports to the user interface |
 //! | [`ui`] | tray icon and device window (Windows) |
+//!
+//! # Reading this documentation
+//!
+//! This site is generated from the source code with `cargo doc` (rustdoc,
+//! the Rust counterpart of Doxygen). Every module, type and function is
+//! documented; the compiler refuses undocumented public items
+//! (`#![deny(missing_docs)]`). Start from:
+//!
+//! * [`guides`] — the user and developer guides (configuration, protocol,
+//!   development, testing);
+//! * [`daemon`] — how the service works;
+//! * [`hidpp`] — the Logitech protocol;
+//! * [`gui`] (when built with the window) — the settings window.
+//!
+//! To build it locally: `cargo doc --document-private-items --open`.
+
+#![deny(missing_docs)]
+#![warn(rustdoc::broken_intra_doc_links)]
+// The published documentation includes private items on purpose (it is the
+// developer manual), so public docs may link to them.
+#![allow(rustdoc::private_intra_doc_links)]
 
 pub mod app;
 #[cfg(windows)]
@@ -44,6 +66,7 @@ pub mod daemon;
 pub mod foreground;
 #[cfg(feature = "gui")]
 pub mod gui;
+pub mod guides;
 pub mod hidpp;
 pub mod http;
 pub mod icon;

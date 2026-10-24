@@ -26,9 +26,11 @@ pub const MAX_SLOTS: u8 = 6;
 /// A device remembered by the receiver.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PairedDevice {
+    /// Receiver slot, 1–6.
     pub slot: u8,
     /// Wireless product id (identifies the model).
     pub wpid: u16,
+    /// Device type as recorded by the receiver.
     pub kind: DeviceKind,
     /// Name stored in the receiver (may be shortened by the firmware).
     pub name: Option<String>,
@@ -113,7 +115,7 @@ fn parse_name(p: &[u8], len_at: usize) -> Option<String> {
 }
 
 /// Device kind codes used by receivers (not the same as feature `0x0005`).
-fn kind_from_code(code: u8) -> DeviceKind {
+pub fn kind_from_code(code: u8) -> DeviceKind {
     match code {
         1 => DeviceKind::Keyboard,
         2 => DeviceKind::Mouse,

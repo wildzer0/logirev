@@ -131,6 +131,32 @@ texts! {
     direct => "Direct connection", "Collegamento diretto";
     buttons_remapped => "{} buttons customised", "{} tasti personalizzati";
 
+    // Pairing
+    pair_new => "Pair a new device", "Associa nuova periferica";
+    pairing_title => "Pair a new device", "Associa una nuova periferica";
+    pairing_unifying_hint => "Turn the device on, or press its connect button. The receiver is listening for 30 seconds.",
+        "Accendi la periferica o premi il suo tasto di connessione. Il ricevitore resta in ascolto per 30 secondi.";
+    pairing_bolt_hint => "Press and hold the device's connect (Easy-Switch) button until its light blinks fast.",
+        "Tieni premuto il tasto di connessione (Easy-Switch) della periferica finché la luce lampeggia velocemente.";
+    searching => "Searching for devices...", "Ricerca delle periferiche...";
+    pair_this => "Pair", "Associa";
+    pairing_in_progress => "Pairing...", "Associazione in corso...";
+    passkey_keyboard => "On the keyboard, type this code and then press Enter:",
+        "Sulla tastiera, digita questo codice e poi premi Invio:";
+    passkey_mouse => "Click the mouse buttons in this order:", "Premi i tasti del mouse in quest'ordine:";
+    passkey_mouse_finish => "Then press the left and right buttons together.", "Poi premi insieme il tasto sinistro e quello destro.";
+    left_short => "Left", "Sinistro";
+    right_short => "Right", "Destro";
+    paired_ok => "Done! The device is paired (slot {}).", "Fatto! La periferica è associata (slot {}).";
+    pairing_failed => "The pairing did not work: {}", "L'associazione non è riuscita: {}";
+    pairing_cancelled => "Pairing stopped.", "Associazione interrotta.";
+    try_again => "Try again", "Riprova";
+    close => "Close", "Chiudi";
+    unpair => "Remove pairing", "Rimuovi associazione";
+    unpair_confirm => "Remove {} from the receiver?", "Rimuovere {} dal ricevitore?";
+    unpair_hint => "It stops working with this receiver until you pair it again (you can do it at any time).",
+        "Smetterà di funzionare con questo ricevitore finché non la associ di nuovo (puoi farlo in qualsiasi momento).";
+
     // Device page
     back => "Devices", "Periferiche";
     tab_buttons => "Buttons", "Tasti";

@@ -46,6 +46,13 @@ enum Page {
     About,
 }
 
+/// What the user did with a device card.
+enum CardAction {
+    None,
+    Open,
+    Unpair,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
     Buttons,
@@ -114,6 +121,8 @@ pub struct SettingsApp {
     update_dismissed: bool,
     /// An update was installed and the restart has been started.
     restarting: bool,
+    /// "Remove pairing?" confirmation: link, slot, device name.
+    confirm_unpair: Option<(String, u8, String)>,
 }
 
 impl SettingsApp {
@@ -158,6 +167,7 @@ impl SettingsApp {
             update: Arc::new(Mutex::new(UpdateStatus::Idle)),
             update_dismissed: false,
             restarting: false,
+            confirm_unpair: None,
         };
         let mut app = app;
         if app.demo {
@@ -197,6 +207,37 @@ impl SettingsApp {
             app.check_for_update(&cc.egui_ctx);
         }
         if app.demo {
+            use crate::hidpp::pairing::{Family, Found, Stage};
+            use crate::status::PairingStatus;
+            let found = vec![Found {
+                counter: 1,
+                address: [1, 2, 3, 4, 5, 6],
+                kind: DeviceKind::Mouse,
+                authentication: 0,
+                name: Some("MX Anywhere 3S".into()),
+            }];
+            let stage = match std::env::var("LOGIREV_PAIRING").as_deref() {
+                Ok("found") => Some(Stage::Waiting),
+                Ok("mouse") => Some(Stage::Passkey {
+                    passkey: "000613".into(),
+                    keyboard: false,
+                    entered: 3,
+                }),
+                Ok("keyboard") => Some(Stage::Passkey {
+                    passkey: "482916".into(),
+                    keyboard: true,
+                    entered: 2,
+                }),
+                Ok("done") => Some(Stage::Paired { slot: 4 }),
+                _ => None,
+            };
+            if let (Some(stage), Some(link)) = (stage, app.snapshot.links.first_mut()) {
+                link.pairing = Some(PairingStatus {
+                    family: Family::Bolt,
+                    stage,
+                    found,
+                });
+            }
             let release = Release {
                 tag_name: "v1.1.0".into(),
                 html_url: env!("CARGO_PKG_REPOSITORY").into(),
@@ -634,23 +675,43 @@ impl SettingsApp {
             } else {
                 icon::BROADCAST
             };
-            ui.label(
-                RichText::new(format!("{link_icon}  {}", link.name))
-                    .strong()
-                    .color(pal.muted),
-            );
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(format!("{link_icon}  {}", link.name))
+                        .strong()
+                        .color(pal.muted),
+                );
+                if link.can_pair && link.pairing.is_none() {
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui
+                            .button(format!("{} {}", icon::PLUS, t.pair_new))
+                            .clicked()
+                        {
+                            self.send(ToService::StartPairing {
+                                link: link.key.clone(),
+                            });
+                        }
+                    });
+                }
+            });
             if link.devices.is_empty() {
                 ui.label(t.no_devices);
             }
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(14.0, 14.0);
                 for d in &link.devices {
-                    if self.device_card(ui, link, d) {
-                        self.page = Page::Device {
-                            link: link.key.clone(),
-                            slot: d.slot,
-                        };
-                        self.tab = Tab::Buttons;
+                    match self.device_card(ui, link, d) {
+                        CardAction::Open => {
+                            self.page = Page::Device {
+                                link: link.key.clone(),
+                                slot: d.slot,
+                            };
+                            self.tab = Tab::Buttons;
+                        }
+                        CardAction::Unpair => {
+                            self.confirm_unpair = Some((link.key.clone(), d.slot, d.name.clone()));
+                        }
+                        CardAction::None => {}
                     }
                 }
             });
@@ -658,8 +719,9 @@ impl SettingsApp {
         }
     }
 
-    /// One device card; returns true when clicked.
-    fn device_card(&self, ui: &mut Ui, _link: &LinkStatus, d: &DeviceStatus) -> bool {
+    /// One device card: a click opens the device (if connected); the
+    /// right-click menu can remove the pairing.
+    fn device_card(&self, ui: &mut Ui, link: &LinkStatus, d: &DeviceStatus) -> CardAction {
         let t = self.t;
         let dark = ui.visuals().dark_mode;
         let pal = palette(dark);
@@ -726,20 +788,28 @@ impl SettingsApp {
                 }
             });
         });
-        let resp = ui.interact(
-            inner.response.rect,
-            id,
-            if d.online {
-                Sense::click()
-            } else {
-                Sense::hover()
-            },
-        );
+        let resp = ui.interact(inner.response.rect, id, Sense::click());
         ui.ctx().data_mut(|m| m.insert_temp(id, resp.hovered()));
         if resp.hovered() && d.online {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
-        resp.clicked()
+        let mut action = if resp.clicked() && d.online {
+            CardAction::Open
+        } else {
+            CardAction::None
+        };
+        if link.can_pair && d.slot != RECEIVER_INDEX {
+            resp.context_menu(|ui| {
+                if ui
+                    .button(format!("{} {}", icon::TRASH, self.t.unpair))
+                    .clicked()
+                {
+                    action = CardAction::Unpair;
+                    ui.close();
+                }
+            });
+        }
+        action
     }
 
     fn find_device(&self, link: &str, slot: u8) -> Option<(LinkStatus, DeviceStatus)> {
@@ -842,6 +912,18 @@ impl SettingsApp {
         ui.separator();
         ui.add_space(6.0);
 
+        let link_can_pair = self
+            .snapshot
+            .links
+            .iter()
+            .any(|l| l.key == link && l.can_pair);
+        if link_can_pair && d.slot != RECEIVER_INDEX {
+            ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                if ui.button(format!("{} {}", icon::TRASH, t.unpair)).clicked() {
+                    self.confirm_unpair = Some((link.to_owned(), d.slot, d.name.clone()));
+                }
+            });
+        }
         match self.tab {
             Tab::Buttons => self.buttons_tab(ui, &d, kind, None),
             Tab::Pointer => self.pointer_tab(ui, &d, kind),
@@ -1292,6 +1374,238 @@ impl SettingsApp {
     }
 
     // ------------------------------------------------------------------
+    // Pairing (modal)
+    // ------------------------------------------------------------------
+
+    /// The pairing assistant, shown while a receiver is in pairing mode.
+    fn pairing_dialog(&mut self, ctx: &egui::Context) {
+        use crate::hidpp::pairing::{mouse_clicks, Family, Stage};
+        let Some(link) = self
+            .snapshot
+            .links
+            .iter()
+            .find(|l| l.pairing.is_some())
+            .cloned()
+        else {
+            return;
+        };
+        let Some(p) = link.pairing.clone() else {
+            return;
+        };
+        let t = self.t;
+        let key = link.key.clone();
+        let mut send: Option<ToService> = None;
+        egui::Modal::new(egui::Id::NULL.with("logirev-pairing")).show(ctx, |ui| {
+            ui.set_width(500.0);
+            let pal = palette(ui.visuals().dark_mode);
+            ui.label(
+                RichText::new(format!("{}  {}", icon::BROADCAST, t.pairing_title))
+                    .size(20.0)
+                    .strong(),
+            );
+            ui.label(RichText::new(&link.name).small().color(pal.muted));
+            ui.add_space(10.0);
+            match &p.stage {
+                Stage::Waiting => {
+                    let hint = if p.family == Family::Bolt {
+                        t.pairing_bolt_hint
+                    } else {
+                        t.pairing_unifying_hint
+                    };
+                    ui.add(egui::Label::new(RichText::new(hint).size(16.0)).wrap());
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(t.searching);
+                    });
+                    for (i, f) in p.found.iter().enumerate() {
+                        let ready = f.address != [0; 6];
+                        card_row(ui, pal.card, pal.border, |ui| {
+                            ui.label(
+                                RichText::new(style::kind_icon(&f.kind.to_string()))
+                                    .size(22.0)
+                                    .color(ACCENT),
+                            );
+                            ui.label(
+                                RichText::new(f.name.clone().unwrap_or_else(|| f.kind.to_string()))
+                                    .strong(),
+                            );
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                let b = egui::Button::new(
+                                    RichText::new(t.pair_this).color(Color32::WHITE),
+                                )
+                                .fill(ACCENT);
+                                if ui.add_enabled(ready, b).clicked() {
+                                    send = Some(ToService::ChoosePairing {
+                                        link: key.clone(),
+                                        index: i,
+                                    });
+                                }
+                            });
+                        });
+                    }
+                }
+                Stage::Pairing => {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(RichText::new(t.pairing_in_progress).size(16.0));
+                    });
+                }
+                Stage::Passkey {
+                    passkey,
+                    keyboard: true,
+                    entered,
+                } => {
+                    ui.label(RichText::new(t.passkey_keyboard).size(16.0));
+                    ui.add_space(6.0);
+                    ui.vertical_centered(|ui| {
+                        ui.label(
+                            RichText::new(passkey)
+                                .size(44.0)
+                                .strong()
+                                .monospace()
+                                .color(ACCENT),
+                        );
+                        ui.label(
+                            RichText::new(format!("{} / {}", entered, passkey.len()))
+                                .color(pal.muted),
+                        );
+                    });
+                }
+                Stage::Passkey {
+                    passkey,
+                    keyboard: false,
+                    entered,
+                } => {
+                    ui.label(RichText::new(t.passkey_mouse).size(16.0));
+                    ui.add_space(6.0);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+                        for (i, right) in mouse_clicks(passkey).iter().enumerate() {
+                            let done = i < usize::from(*entered);
+                            let (ic, label) = if *right {
+                                (icon::CARET_RIGHT, t.right_short)
+                            } else {
+                                (icon::CARET_LEFT, t.left_short)
+                            };
+                            let color = if done { GOOD } else { ACCENT };
+                            Frame::new()
+                                .stroke(Stroke::new(1.5, color))
+                                .corner_radius(CornerRadius::same(8))
+                                .inner_margin(Margin::symmetric(2, 4))
+                                .show(ui, |ui| {
+                                    // Fixed-size box: a wrapping row must not
+                                    // stretch it.
+                                    ui.set_width(40.0);
+                                    ui.vertical_centered(|ui| {
+                                        ui.label(
+                                            RichText::new(format!("{}", i + 1))
+                                                .small()
+                                                .color(pal.muted),
+                                        );
+                                        ui.label(RichText::new(ic).size(20.0).color(color));
+                                        ui.label(RichText::new(label).size(10.0).color(color));
+                                    });
+                                });
+                        }
+                    });
+                    ui.add_space(6.0);
+                    ui.label(RichText::new(t.passkey_mouse_finish).strong());
+                }
+                Stage::Paired { slot } => {
+                    ui.label(
+                        RichText::new(format!(
+                            "{} {}",
+                            icon::CHECK_CIRCLE,
+                            fill(t.paired_ok, &[&slot.to_string()])
+                        ))
+                        .size(17.0)
+                        .color(GOOD),
+                    );
+                }
+                Stage::Failed { reason } => {
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(fill(t.pairing_failed, &[reason])).color(BAD),
+                        )
+                        .wrap(),
+                    );
+                }
+                Stage::Cancelled => {
+                    ui.label(t.pairing_cancelled);
+                }
+            }
+            ui.add_space(12.0);
+            ui.separator();
+            ui.horizontal(|ui| {
+                if p.stage.is_finished() {
+                    if !matches!(p.stage, Stage::Paired { .. })
+                        && ui
+                            .add(
+                                egui::Button::new(RichText::new(t.try_again).color(Color32::WHITE))
+                                    .fill(ACCENT),
+                            )
+                            .clicked()
+                    {
+                        send = Some(ToService::StartPairing { link: key.clone() });
+                    }
+                    if ui.button(t.close).clicked() {
+                        send = Some(ToService::StopPairing { link: key.clone() });
+                    }
+                } else if ui.button(t.cancel).clicked() {
+                    send = Some(ToService::StopPairing { link: key.clone() });
+                }
+            });
+        });
+        if let Some(msg) = send {
+            self.send(msg);
+        }
+        // Keep the spinner and progress moving while pairing.
+        ctx.request_repaint_after(Duration::from_millis(250));
+    }
+
+    /// "Remove pairing?" confirmation.
+    fn unpair_dialog(&mut self, ctx: &egui::Context) {
+        let Some((link, slot, name)) = self.confirm_unpair.clone() else {
+            return;
+        };
+        let t = self.t;
+        let mut answer: Option<bool> = None;
+        let modal = egui::Modal::new(egui::Id::NULL.with("logirev-unpair")).show(ctx, |ui| {
+            ui.set_width(440.0);
+            ui.label(
+                RichText::new(fill(t.unpair_confirm, &[&name]))
+                    .size(18.0)
+                    .strong(),
+            );
+            ui.add_space(6.0);
+            ui.add(egui::Label::new(t.unpair_hint).wrap());
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                let b = egui::Button::new(RichText::new(t.unpair).color(Color32::WHITE)).fill(BAD);
+                if ui.add(b).clicked() {
+                    answer = Some(true);
+                }
+                if ui.button(t.cancel).clicked() {
+                    answer = Some(false);
+                }
+            });
+        });
+        if modal.should_close() && answer.is_none() {
+            answer = Some(false);
+        }
+        if let Some(yes) = answer {
+            self.confirm_unpair = None;
+            if yes {
+                self.send(ToService::Unpair { link, slot });
+                if matches!(&self.page, Page::Device { slot: s, .. } if *s == slot) {
+                    self.page = Page::Devices;
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
     // Macros
     // ------------------------------------------------------------------
 
@@ -1655,6 +1969,8 @@ impl eframe::App for SettingsApp {
                     });
             });
         self.editor_dialog(&ctx);
+        self.pairing_dialog(&ctx);
+        self.unpair_dialog(&ctx);
     }
 }
 
@@ -1980,6 +2296,8 @@ fn demo_snapshot() -> Snapshot {
             key: "demo".into(),
             name: "Bolt receiver (046d:c548)".into(),
             is_receiver: true,
+            can_pair: true,
+            pairing: None,
             devices: vec![
                 device(1, "Wave Keys", "keyboard", false, None, None),
                 device(2, "MX Ergo S", "trackball", true, Some("30%"), Some(ergo)),

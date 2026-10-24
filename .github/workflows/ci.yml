@@ -36,3 +36,8 @@ jobs:
         run: cargo test --locked
       - name: Lints without the settings window
         run: cargo clippy --all-targets --locked --no-default-features -- -D warnings
+      - name: Documentation (no warnings, no undocumented items)
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps --document-private-items --locked

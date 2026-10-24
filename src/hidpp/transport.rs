@@ -76,16 +76,24 @@ pub fn receiver_name(pid: u16) -> Option<&'static str> {
 /// One HID++ capable collection found on the system.
 #[derive(Debug, Clone)]
 pub struct HidInterface {
+    /// Operating-system path used to open the collection.
     pub path: CString,
+    /// USB product id.
     pub pid: u16,
+    /// HID usage page (`0xFF00` / `0xFF43` for HID++).
     pub usage_page: u16,
+    /// HID usage within the page (1 = short reports, 2 = long reports).
     pub usage: u16,
+    /// USB interface number (-1 if unknown).
     pub interface: i32,
+    /// Product name reported by the device.
     pub product: String,
+    /// Connected over Bluetooth.
     pub bluetooth: bool,
 }
 
 impl HidInterface {
+    /// The product id is a known receiver.
     pub fn is_receiver(&self) -> bool {
         receiver_name(self.pid).is_some()
     }
@@ -190,7 +198,9 @@ pub enum Incoming {
 pub struct Transport {
     /// Display name, e.g. "Bolt receiver (046d:c548)".
     pub name: String,
+    /// USB product id of the receiver or device.
     pub pid: u16,
+    /// A receiver (devices are reached through slots 1–6).
     pub is_receiver: bool,
     /// Software id stamped on our requests (see [`super::frame::SOFTWARE_ID`]).
     swid: u8,
@@ -203,6 +213,7 @@ pub struct Transport {
     stop: Arc<AtomicBool>,
     readers: Vec<JoinHandle<()>>,
     pcap: Option<Arc<Mutex<PcapWriter>>>,
+    /// How long a request waits for its answer.
     pub timeout: Duration,
 }
 
@@ -442,6 +453,19 @@ impl Transport {
         params: &[u8],
     ) -> Result<Vec<u8>, HidppError> {
         self.register(0x83, address, params)
+    }
+
+    /// Writes a long receiver register (parameters up to 16 bytes, sent in
+    /// a long report). Used by Bolt pairing.
+    pub fn write_long_register(
+        &mut self,
+        address: u8,
+        params: &[u8],
+    ) -> Result<Vec<u8>, HidppError> {
+        let mut payload = vec![0x82, address];
+        payload.extend_from_slice(params);
+        let answer = self.request(&Frame::new(REPORT_LONG, RECEIVER_INDEX, &payload))?;
+        Ok(answer.params().to_vec())
     }
 
     fn register(&mut self, sub_id: u8, address: u8, params: &[u8]) -> Result<Vec<u8>, HidppError> {

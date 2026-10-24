@@ -8,7 +8,7 @@ from an **MX Ergo S** paired to a **Logi Bolt** receiver (slot 2).
 
 ## 1. The big picture
 
-```
+```text
  ┌────────────┐   USB   ┌──────────────┐  radio  ┌───────────────┐
  │  Computer  │◀───────▶│ Bolt receiver│◀───────▶│  MX Ergo S    │
  │ (logirev)  │         │  ("dongle")  │         │  (slot 2)     │
@@ -31,7 +31,7 @@ Every message is a short row of bytes (numbers from `00` to `FF`, written in
 hexadecimal). There are two sizes: **short** (7 bytes) and **long** (20
 bytes). The first four bytes always have the same meaning:
 
-```
+```text
   11      02      0A        3A        00 53 03 00 00 ...
   │       │       │         │         └─ parameters (what to do exactly)
   │       │       │         └─ function number (3) + "signature" (A)
@@ -72,7 +72,7 @@ Arrows: `→` computer to device, `←` device to computer.
 
 When the trackball wakes up, the **receiver** tells the computer:
 
-```
+```text
 ← 10 02 41 ...        slot 2: link established
 ```
 
@@ -82,14 +82,14 @@ when it sleeps, so the settings must be sent again on each connection.
 
 ### Step 2 — "Are you there? Which protocol do you speak?"
 
-```
+```text
 → 11 02 00 1A 00 00 5A          Root (00), function 1, signature A, marker 5A
 ← 11 02 00 1A 04 05 5A          "HID++ version 4.5", marker 5A echoed back
 ```
 
 ### Step 3 — "Where is feature 0x1B04?"
 
-```
+```text
 → 11 02 00 0A 1B 04             Root, function 0: look up feature 1B04
 ← 11 02 00 0A 0A ...            "it is my feature number 10"
 ```
@@ -98,7 +98,7 @@ logirev repeats this for every feature and learns the device's whole list.
 
 ### Step 4 — Applying settings (example: 400 DPI)
 
-```
+```text
 → 11 02 0F 3A 00 01 90          AdjustableDpi (15), function 3 "set DPI",
                                 sensor 0, value 0190 (hex) = 400 DPI
 ← 11 02 0F 3A 00 01 90          the device confirms by echoing
@@ -109,7 +109,7 @@ logirev repeats this for every feature and learns the device's whole list.
 To remap the *Back* button (control id `0053`), logirev asks the device to
 stop handling it by itself and to *report* it instead:
 
-```
+```text
 → 11 02 0A 3A 00 53 03          ReprogControls (10), function 3,
                                 button 0053, flags 03 = "divert: yes"
 ← 11 02 0A 3A 00 53 03          confirmed
@@ -119,7 +119,7 @@ From now on pressing Back does **nothing** on the computer by itself...
 
 ### Step 6 — ...instead the device reports it
 
-```
+```text
 ← 11 02 0A 00 00 53 00 00 ...   signature 0 = spontaneous message:
                                 "buttons held now: 0053"
 ← 11 02 0A 00 00 00 00 00 ...   "buttons held now: none" (released)
@@ -136,12 +136,41 @@ device behaves normally again.
 
 ---
 
-## 4. Errors
+## 4. Pairing a new device
+
+The receiver keeps a list of up to six paired devices. Adding one is also
+done with configuration messages, this time addressed to the receiver
+itself (slot `FF`) and its *registers* (numbered settings of the receiver):
+
+**Unifying receivers** have a "door" that can be opened for 30 seconds:
+
+```text
+→ 10 FF 80 B2 01 00 1E        register B2: open the door (1E = 30 seconds)
+← 10 FF 4A 01 00 ...          "door open"
+← 10 03 41 ...                a device connected in slot 3: the new one
+```
+
+**Bolt receivers** are more careful, because a radio is involved and a
+stranger nearby could otherwise pair their keyboard with your computer:
+
+1. *Look around* — register `C0` starts a search; every device in pairing
+   mode answers (`4F` messages) with its radio address, type and name.
+2. *Ask to pair* — register `C1` with the chosen device's address.
+3. *Prove it* — the receiver makes up a code (`4D` message) that must be
+   entered **on the new device**: typed on a keyboard, or as a sequence of
+   left/right clicks on a mouse (the code written in binary: 0 = left,
+   1 = right). Only someone holding the device can do that.
+4. *Result* — a `54` message says "paired in slot N".
+
+Removing a device writes action `03` and the slot number to the same
+registers (`B2` for Unifying, `C1` for Bolt).
+
+## 5. Errors
 
 If a question cannot be answered, the reply has `FF` (or `8F` from the
 receiver) in byte 3, followed by the question and an error code:
 
-```
+```text
 ← 11 02 FF 0F 3A 02             error 02 "InvalidArgument" for feature 15,
                                 function 3 (e.g. a DPI value not supported)
 ```
@@ -151,7 +180,7 @@ logirev writes these in plain words in its log, e.g.
 
 ---
 
-## 5. Reading a capture in Wireshark
+## 6. Reading a capture in Wireshark
 
 1. In `logirev.toml` set `pcap = "logirev.pcap"` (or run with
    `--pcap logirev.pcap`), start logirev, use the device, stop logirev.
@@ -164,7 +193,7 @@ logirev writes these in plain words in its log, e.g.
 
 ---
 
-## 6. Glossary
+## 7. Glossary
 
 | Term | Meaning |
 |---|---|

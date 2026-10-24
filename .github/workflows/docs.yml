@@ -1,0 +1,77 @@
+# Documentation site: every push to main regenerates the code documentation
+# (rustdoc, the Rust counterpart of Doxygen) including the guides of docs/,
+# and publishes it on GitHub Pages: https://wildzer0.github.io/logirev/
+#
+# Publishing starts working once Pages is enabled in the repository
+# (Settings -> Pages -> Source: "GitHub Actions"); until then the site is
+# only built and checked.
+name: Documentation
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      pages: ${{ steps.pages.outputs.enabled }}
+    steps:
+      - name: Is GitHub Pages enabled?
+        id: pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$(gh api repos/${{ github.repository }}/pages --jq .build_type 2>/dev/null)" = "workflow" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::GitHub Pages is not enabled (Settings -> Pages -> Source: GitHub Actions); the site is built but not published."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build the documentation
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps --document-private-items --locked
+
+      - name: Prepare the site
+        run: |
+          # The README (included as guides::readme) shows screenshots by
+          # relative path.
+          mkdir -p target/doc/logirev/guides/readme/docs
+          cp -r docs/images target/doc/logirev/guides/readme/docs/
+          # The site root opens the crate documentation.
+          echo '<meta http-equiv="refresh" content="0; url=logirev/index.html">' > target/doc/index.html
+
+      - uses: actions/upload-pages-artifact@v3
+        if: steps.pages.outputs.enabled == 'true'
+        with:
+          path: target/doc
+
+  deploy:
+    needs: build
+    if: needs.build.outputs.pages == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

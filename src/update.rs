@@ -43,12 +43,16 @@ pub struct Release {
     #[serde(default)]
     pub body: String,
     #[serde(default)]
+    /// Files attached to the release.
     pub assets: Vec<Asset>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
+/// A file attached to a release.
 pub struct Asset {
+    /// File name.
     pub name: String,
+    /// Direct download address.
     pub browser_download_url: String,
 }
 

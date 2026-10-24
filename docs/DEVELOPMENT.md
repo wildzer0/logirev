@@ -2,6 +2,29 @@
 
 For contributors. Users only need the [README](../README.md).
 
+## Code documentation
+
+The code is documented with doc comments (`///` for items, `//!` for
+modules) and rendered by **rustdoc** — the Rust counterpart of Doxygen,
+built into the toolchain:
+
+```bash
+cargo doc --document-private-items --open
+```
+
+- `#![deny(missing_docs)]` in `src/lib.rs`: the build fails if a public
+  item has no documentation.
+- The CI builds the documentation with `RUSTDOCFLAGS=-D warnings`, so broken
+  links and malformed documentation also fail.
+- The guides of `docs/` (and the README / CHANGELOG) are included as the
+  `guides` module, so the site is the complete manual.
+- `.github/workflows/docs.yml` publishes the site on GitHub Pages at every
+  push to `main` (enable it once: *Settings → Pages → Source: GitHub
+  Actions*): <https://wildzer0.github.io/logirev/>.
+
+Write documentation for a reader who does not know HID++: say *what* the
+item is for and *why*, with the bytes on the wire when it helps.
+
 ## Building and testing
 
 Requirements: [Rust](https://rustup.rs) (stable). No C compiler and no system
@@ -41,6 +64,8 @@ Both are thin wrappers around the library in `src/lib.rs`.
 | `src/hidpp/transport.rs` | enumerating/grouping HID collections, reader threads, request/response matching |
 | `src/hidpp/features.rs` | HID++ 2.0 features: name, battery, DPI, speed, wheel, buttons |
 | `src/hidpp/receiver.rs` | receiver registers: paired devices |
+| `src/hidpp/pairing.rs` | pairing new devices (Unifying lock, Bolt discovery + passkey) and removing pairings |
+| `src/guides.rs` | includes the `docs/*.md` guides in the generated documentation |
 | `src/input/` | synthetic keyboard/mouse: `SendInput` (Windows), `uinput` (Linux) |
 | `src/instance.rs` | single-instance lock |
 | `src/service.rs` | start at log-in (systemd user unit) |
@@ -60,7 +85,7 @@ Both are thin wrappers around the library in `src/lib.rs`.
 
 ## Architecture in brief
 
-```
+```text
  reader threads (1 per HID path) ──frame──▶ Transport queue ──wake──▶ ┐
  Ctrl+C handler (terminal) ────────────────────── Event::Quit ──────▶ ├─▶ daemon event loop
  UI thread: menu, WM_DEVICECHANGE ─── Event::Reload/Rescan/Quit ────▶ ┤     (own thread)

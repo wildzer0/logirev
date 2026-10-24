@@ -74,6 +74,7 @@ pub fn current() -> Option<String> {
     Some(String::from_utf16_lossy(&buf[..end]))
 }
 
+/// Whether logirev is set to start at log-in.
 pub fn is_enabled() -> bool {
     current().is_some()
 }

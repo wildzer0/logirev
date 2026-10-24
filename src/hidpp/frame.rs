@@ -86,10 +86,12 @@ impl Frame {
         &self.bytes
     }
 
+    /// Byte 0: [`REPORT_SHORT`] or [`REPORT_LONG`].
     pub fn report_id(&self) -> u8 {
         self.bytes[0]
     }
 
+    /// Byte 1: receiver slot 1–6, or [`RECEIVER_INDEX`].
     pub fn device_index(&self) -> u8 {
         self.bytes[1]
     }

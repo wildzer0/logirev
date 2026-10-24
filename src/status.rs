@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 /// Everything the interface shows.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Snapshot {
+    /// One entry per open receiver or direct device.
     pub links: Vec<LinkStatus>,
 }
 
@@ -22,9 +23,27 @@ pub struct LinkStatus {
     pub key: String,
     /// e.g. "Bolt receiver (046d:c548)".
     pub name: String,
+    /// A receiver (as opposed to a directly connected device).
     pub is_receiver: bool,
     /// Paired or connected devices, by slot.
     pub devices: Vec<DeviceStatus>,
+    /// The receiver can pair new devices (Bolt, Unifying).
+    #[serde(default)]
+    pub can_pair: bool,
+    /// A pairing session in progress or just finished.
+    #[serde(default)]
+    pub pairing: Option<PairingStatus>,
+}
+
+/// State of a pairing session, for the settings window.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PairingStatus {
+    /// Pairing protocol of the receiver.
+    pub family: crate::hidpp::pairing::Family,
+    /// Where the session stands.
+    pub stage: crate::hidpp::pairing::Stage,
+    /// Bolt: devices found so far (the user picks one).
+    pub found: Vec<crate::hidpp::pairing::Found>,
 }
 
 /// One device, connected or only paired.
@@ -32,12 +51,15 @@ pub struct LinkStatus {
 pub struct DeviceStatus {
     /// Receiver slot 1–6, or `0xFF` for a direct connection.
     pub slot: u8,
+    /// Marketing name, e.g. "MX Ergo S".
     pub name: String,
     /// e.g. "trackball".
     pub kind: String,
     /// Connected and configured right now.
     pub online: bool,
+    /// Battery level, e.g. "80% (charging)".
     pub battery: Option<String>,
+    /// Current DPI, if adjustable.
     pub dpi: Option<u16>,
     /// Name of the profile applied, if any.
     pub profile: Option<String>,
@@ -54,28 +76,36 @@ pub struct DeviceStatus {
 /// Capabilities of a connected device: which settings make sense for it.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeviceDetails {
+    /// Main firmware version, e.g. "RBM 26.01.B0013".
     pub firmware: String,
     /// Buttons the firmware lets software look at.
     pub controls: Vec<ControlInfo>,
     /// Accepted DPI values (empty = no adjustable DPI).
     pub dpi_values: Vec<u16>,
+    /// Has an adjustable pointer speed.
     pub pointer_speed: bool,
+    /// Has a configurable high-resolution wheel.
     pub hires_wheel: bool,
+    /// Has SmartShift.
     pub smartshift: bool,
+    /// Has a thumb wheel.
     pub thumb_wheel: bool,
     /// Accepted report rates in Hz (empty = not adjustable).
     pub report_rates: Vec<u16>,
+    /// Can swap F-keys and media keys.
     pub fn_keys: bool,
     /// Keys that can be disabled (bit mask, see `DISABLE_KEY_NAMES`).
     pub disable_keys: u8,
     /// Number of manual backlight levels, if the keyboard is backlit.
     pub backlight_levels: Option<u8>,
+    /// The backlight can follow the room light.
     pub backlight_auto: bool,
 }
 
 /// One button of a device.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ControlInfo {
+    /// Control id (identifies the button in HID++ messages).
     pub cid: u16,
     /// How the button is written in the configuration (`back`, `"0x00C3"`).
     pub key: String,
@@ -90,6 +120,7 @@ pub struct ControlInfo {
 /// Easy-Switch channels of a device.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HostsStatus {
+    /// Number of computers the device can switch between.
     pub count: u8,
     /// Channel in use, counted from 0.
     pub current: u8,
@@ -138,7 +169,12 @@ pub enum UiUpdate {
     /// The state changed.
     Snapshot(Snapshot),
     /// Something the user should read (shown as a notification).
-    Notice { title: String, text: String },
+    Notice {
+        /// Short title.
+        title: String,
+        /// The message.
+        text: String,
+    },
     /// The service stopped; `Some` carries the error that stopped it.
     Stopped(Option<String>),
 }
@@ -148,6 +184,7 @@ pub type Observer = Box<dyn Fn(UiUpdate) + Send>;
 
 /// How a graphical interface is attached to the daemon.
 pub struct UiHooks {
+    /// Receives every update (called on the daemon thread).
     pub observer: Observer,
     /// The interface reports device arrivals (`Event::Rescan`), so the
     /// daemon does not need to look for new receivers periodically.
@@ -181,6 +218,8 @@ mod tests {
                 key: "k".into(),
                 name: "Bolt".into(),
                 is_receiver: true,
+                can_pair: true,
+                pairing: None,
                 devices: vec![
                     device("Wave Keys", false, None),
                     device("MX Ergo S", true, Some("30%")),
@@ -193,6 +232,8 @@ mod tests {
                 key: "k".into(),
                 name: "x".into(),
                 is_receiver: true,
+                can_pair: true,
+                pairing: None,
                 devices: (0..20)
                     .map(|i| device(&format!("Device {i}"), true, None))
                     .collect(),

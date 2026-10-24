@@ -19,27 +19,49 @@ use super::transport::Transport;
 
 /// Feature ids (only the ones logirev uses or reports).
 pub mod id {
+    /// Root: feature lookup and protocol version ("ping").
     pub const ROOT: u16 = 0x0000;
+    /// FeatureSet: the list of every feature of a device.
     pub const FEATURE_SET: u16 = 0x0001;
+    /// DeviceFwInfo: firmware versions.
     pub const DEVICE_FW_INFO: u16 = 0x0003;
+    /// DeviceNameType: marketing name and device type.
     pub const DEVICE_NAME_TYPE: u16 = 0x0005;
+    /// BatteryStatus: battery level (older devices).
     pub const BATTERY_STATUS: u16 = 0x1000;
+    /// UnifiedBattery: battery level and charging state.
     pub const UNIFIED_BATTERY: u16 = 0x1004;
+    /// ReprogControlsV4: reprogrammable buttons and diversion.
     pub const REPROG_CONTROLS_V4: u16 = 0x1B04;
+    /// WirelessDeviceStatus: announces reconnections (direct connections).
     pub const WIRELESS_DEVICE_STATUS: u16 = 0x1D4B;
+    /// AdjustableDpi: sensor resolution.
     pub const ADJUSTABLE_DPI: u16 = 0x2201;
+    /// PointerSpeed: pointer acceleration factor.
     pub const POINTER_SPEED: u16 = 0x2205;
+    /// HiResWheel: high-resolution / inverted scrolling.
     pub const HIRES_WHEEL: u16 = 0x2121;
+    /// ChangeHost: Easy-Switch between computers.
     pub const CHANGE_HOST: u16 = 0x1814;
+    /// SmartShift: ratchet / free-spin wheel mode.
     pub const SMART_SHIFT: u16 = 0x2110;
+    /// SmartShiftEnhanced: SmartShift, newer function layout.
     pub const SMART_SHIFT_ENHANCED: u16 = 0x2111;
+    /// ThumbWheel: the horizontal thumb wheel.
     pub const THUMB_WHEEL: u16 = 0x2150;
+    /// ReportRate: how often a gaming mouse reports.
     pub const REPORT_RATE: u16 = 0x8060;
+    /// FnInversion: F-keys vs media keys (first version).
     pub const FN_INVERSION: u16 = 0x40A0;
+    /// FnInversion, second version.
     pub const FN_INVERSION_NEW: u16 = 0x40A2;
+    /// FnInversion, K375s layout (extra 0xFF parameter).
     pub const FN_INVERSION_K375S: u16 = 0x40A3;
+    /// DisableKeys: disable Caps Lock, Insert, Windows key...
     pub const DISABLE_KEYS: u16 = 0x4521;
+    /// HostsInfo: names of the Easy-Switch computers.
     pub const HOSTS_INFO: u16 = 0x1815;
+    /// Backlight2: keyboard backlight.
     pub const BACKLIGHT2: u16 = 0x1982;
 }
 
@@ -128,10 +150,12 @@ impl FeatureTable {
         Ok(Self { map })
     }
 
+    /// The feature index of `feature` on this device, if it has the feature.
     pub fn index_of(&self, feature: u16) -> Option<u8> {
         self.map.get(&feature).copied()
     }
 
+    /// Whether the device has `feature`.
     pub fn has(&self, feature: u16) -> bool {
         self.map.contains_key(&feature)
     }
@@ -146,16 +170,27 @@ impl FeatureTable {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DeviceKind {
+    /// A keyboard.
     Keyboard,
+    /// A remote control.
     Remote,
+    /// A numeric keypad.
     Numpad,
+    /// A mouse.
     Mouse,
+    /// A touchpad.
     Trackpad,
+    /// A trackball.
     Trackball,
+    /// A presentation remote.
     Presenter,
+    /// A receiver (dongle).
     Receiver,
+    /// A headset.
     Headset,
+    /// A webcam.
     Webcam,
+    /// Anything else.
     Other,
 }
 
@@ -192,6 +227,7 @@ pub struct Device<'a> {
 }
 
 impl<'a> Device<'a> {
+    /// A handle to device `index` reachable through `t`, whose features are `features`.
     pub fn new(t: &'a mut Transport, index: u8, features: &'a FeatureTable) -> Self {
         Self { t, index, features }
     }
@@ -242,6 +278,7 @@ impl<'a> Device<'a> {
         Ok(String::from_utf8_lossy(&name[..end]).trim().to_owned())
     }
 
+    /// Device category (mouse, keyboard, trackball...).
     pub fn kind(&mut self) -> Result<DeviceKind, HidppError> {
         Ok(DeviceKind::from_code(
             self.call_min(id::DEVICE_NAME_TYPE, 2, &[], 1)?[0],
@@ -287,6 +324,7 @@ impl<'a> Device<'a> {
         Ok(u16::from_be_bytes([p[0], p[1]]))
     }
 
+    /// Sets the pointer speed (raw units, 256 = 1.0×).
     pub fn set_pointer_speed(&mut self, raw: u16) -> Result<(), HidppError> {
         self.call(id::POINTER_SPEED, 1, &raw.to_be_bytes())
             .map(drop)
@@ -300,6 +338,7 @@ impl<'a> Device<'a> {
         Ok(u16::from_be_bytes([p[1], p[2]]))
     }
 
+    /// Sets the DPI of sensor 0.
     pub fn set_dpi(&mut self, dpi: u16) -> Result<(), HidppError> {
         let [hi, lo] = dpi.to_be_bytes();
         self.call(id::ADJUSTABLE_DPI, 3, &[0, hi, lo]).map(drop)
@@ -320,6 +359,7 @@ impl<'a> Device<'a> {
         Ok(self.call_min(id::HIRES_WHEEL, 1, &[], 1)?[0])
     }
 
+    /// Sets the wheel mode flags (see [`Device::wheel_mode`]).
     pub fn set_wheel_mode(&mut self, flags: u8) -> Result<(), HidppError> {
         self.call(id::HIRES_WHEEL, 2, &[flags]).map(drop)
     }
@@ -440,6 +480,7 @@ impl<'a> Device<'a> {
         Ok(BacklightState::parse(&p))
     }
 
+    /// Applies a backlight state (as read by [`Device::backlight`], modified).
     pub fn set_backlight(&mut self, state: &BacklightState) -> Result<(), HidppError> {
         self.call(id::BACKLIGHT2, 1, &state.to_params()).map(drop)
     }
@@ -464,6 +505,7 @@ impl<'a> Device<'a> {
         })
     }
 
+    /// Sets the SmartShift mode.
     pub fn set_smart_shift(&mut self, mode: SmartShift) -> Result<(), HidppError> {
         // [wheel mode (1 free spin, 2 ratchet), auto-disengage threshold, default]
         let params = [if mode.free_spin { 1 } else { 2 }, mode.threshold, 0];
@@ -482,6 +524,7 @@ impl<'a> Device<'a> {
         Ok(self.call_min(id::THUMB_WHEEL, 1, &[], 2)?[1] & 0x01 != 0)
     }
 
+    /// Reverses (`true`) or restores the thumb wheel direction.
     pub fn set_thumb_wheel_inverted(&mut self, inverted: bool) -> Result<(), HidppError> {
         // setThumbwheelReporting(mode 0 = normal HID, inverted)
         self.call(id::THUMB_WHEEL, 2, &[0, u8::from(inverted)])
@@ -506,6 +549,7 @@ impl<'a> Device<'a> {
         Ok(1000 / u16::from(ms))
     }
 
+    /// Sets the report rate in Hz (125–1000; converted to milliseconds).
     pub fn set_report_rate(&mut self, hz: u16) -> Result<(), HidppError> {
         let ms = (1000 / hz.clamp(125, 1000)) as u8;
         self.call(id::REPORT_RATE, 2, &[ms]).map(drop)
@@ -536,6 +580,7 @@ impl<'a> Device<'a> {
         }
     }
 
+    /// Makes F1–F12 do their special function without Fn (`true`) or not.
     pub fn set_fn_keys_special(&mut self, special: bool) -> Result<(), HidppError> {
         let f = self
             .fn_feature()
@@ -554,6 +599,7 @@ impl<'a> Device<'a> {
         Ok(self.call_min(id::DISABLE_KEYS, 0, &[], 1)?[0])
     }
 
+    /// Disables the keys in `mask` (bits from [`DISABLE_KEY_NAMES`]); other keys are enabled.
     pub fn set_disabled_keys(&mut self, mask: u8) -> Result<(), HidppError> {
         self.call(id::DISABLE_KEYS, 2, &[mask]).map(drop)
     }
@@ -563,8 +609,11 @@ impl<'a> Device<'a> {
 /// (0x1000), both in answers and in spontaneous notifications.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Battery {
+    /// Charge level, 0–100.
     pub percent: u8,
+    /// Charging now.
     pub charging: bool,
+    /// Fully charged.
     pub full: bool,
 }
 
@@ -607,7 +656,9 @@ impl fmt::Display for Battery {
 /// scrolling speed (`threshold` 1–254; 255 = always ratchet).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SmartShift {
+    /// Wheel spins freely (no clicks).
     pub free_spin: bool,
+    /// Speed above which the ratchet releases (1–254; 255 = never).
     pub threshold: u8,
 }
 
@@ -625,6 +676,7 @@ impl fmt::Display for SmartShift {
 /// 16-bit fields of this feature are little-endian.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BacklightState {
+    /// Backlight switched on.
     pub enabled: bool,
     /// Bits 3–4 hold the mode (see [`BacklightState::mode`]).
     pub options: u8,
@@ -639,7 +691,9 @@ pub struct BacklightState {
 impl BacklightState {
     /// Mode values.
     pub const MODE_DEFAULT: u8 = 0;
+    /// Mode: brightness follows the room light.
     pub const MODE_AUTO: u8 = 1;
+    /// Mode: fixed brightness [`BacklightState::level`].
     pub const MODE_MANUAL: u8 = 3;
 
     /// `[enabled, options, supported, effects x2, level, durations x3 (u16 LE)]`.
@@ -668,18 +722,22 @@ impl BacklightState {
         v
     }
 
+    /// Current mode (`MODE_DEFAULT`, `MODE_AUTO`, `MODE_MANUAL`).
     pub fn mode(&self) -> u8 {
         (self.options >> 3) & 0x03
     }
 
+    /// Changes the mode, keeping the other option bits.
     pub fn set_mode(&mut self, mode: u8) {
         self.options = (self.options & 0x07) | ((mode & 0x03) << 3);
     }
 
+    /// The keyboard has a light sensor (automatic mode).
     pub fn supports_auto(&self) -> bool {
         self.supported & 0x08 != 0
     }
 
+    /// The keyboard supports fixed brightness levels.
     pub fn supports_manual(&self) -> bool {
         self.supported & 0x20 != 0
     }
@@ -710,8 +768,17 @@ pub const DISABLE_KEY_NAMES: &[(&str, u8)] = &[
 /// Resolutions a sensor accepts: either a list or a stepped range.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DpiChoices {
+    /// An explicit list of accepted values.
     Values(Vec<u16>),
-    Range { min: u16, max: u16, step: u16 },
+    /// Every `step` from `min` to `max`.
+    Range {
+        /// Smallest value.
+        min: u16,
+        /// Largest value.
+        max: u16,
+        /// Distance between accepted values.
+        step: u16,
+    },
 }
 
 impl DpiChoices {
@@ -750,6 +817,7 @@ impl DpiChoices {
         }
     }
 
+    /// Whether the sensor accepts `dpi`.
     pub fn contains(&self, dpi: u16) -> bool {
         match self {
             Self::Values(v) => v.contains(&dpi),
@@ -786,6 +854,7 @@ pub struct Control {
 }
 
 impl Control {
+    /// The control is a mouse button.
     pub fn is_mouse_button(&self) -> bool {
         self.flags & 0x01 != 0
     }
@@ -793,6 +862,7 @@ impl Control {
     pub fn is_divertable(&self) -> bool {
         self.flags & 0x20 != 0
     }
+    /// The control is virtual (no physical button, e.g. a gesture).
     pub fn is_virtual(&self) -> bool {
         self.flags & 0x80 != 0
     }

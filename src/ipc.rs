@@ -36,7 +36,10 @@ use crate::status::{Snapshot, UiUpdate};
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ToClient {
     /// The current state of every receiver and device.
-    Snapshot { snapshot: Snapshot },
+    Snapshot {
+        /// The state.
+        snapshot: Snapshot,
+    },
     /// Sent every few seconds so both sides notice a dead connection.
     Ping,
 }
@@ -46,13 +49,47 @@ pub enum ToClient {
 #[serde(tag = "cmd", rename_all = "snake_case")]
 pub enum ToService {
     /// First message: proves the window may talk to this service.
-    Auth { token: String },
+    Auth {
+        /// The secret from the discovery file.
+        token: String,
+    },
     /// Re-read the configuration file now.
     Reload,
     /// Look for receivers again.
     Rescan,
     /// Send a device to another computer (Easy-Switch).
-    ChangeHost { link: String, slot: u8, host: u8 },
+    ChangeHost {
+        /// Receiver, as `LinkStatus::key`.
+        link: String,
+        /// Receiver slot of the device.
+        slot: u8,
+        /// Target computer, counted from 0.
+        host: u8,
+    },
+    /// Put a receiver in pairing mode.
+    StartPairing {
+        /// Receiver, as `LinkStatus::key`.
+        link: String,
+    },
+    /// Bolt: pair the `index`-th device found.
+    ChoosePairing {
+        /// Receiver, as `LinkStatus::key`.
+        link: String,
+        /// Position in the list of devices found.
+        index: usize,
+    },
+    /// Stop pairing / forget a finished session.
+    StopPairing {
+        /// Receiver, as `LinkStatus::key`.
+        link: String,
+    },
+    /// Remove a device from a receiver.
+    Unpair {
+        /// Receiver, as `LinkStatus::key`.
+        link: String,
+        /// Receiver slot of the device to remove.
+        slot: u8,
+    },
     /// Stop the service.
     Quit,
 }
@@ -225,6 +262,12 @@ impl Server {
                         ToService::ChangeHost { link, slot, host } => {
                             Event::ChangeHost { link, slot, host }
                         }
+                        ToService::StartPairing { link } => Event::StartPairing { link },
+                        ToService::ChoosePairing { link, index } => {
+                            Event::ChoosePairing { link, index }
+                        }
+                        ToService::StopPairing { link } => Event::StopPairing { link },
+                        ToService::Unpair { link, slot } => Event::Unpair { link, slot },
                         ToService::Quit => Event::Quit,
                     };
                     if tx.send(event).is_err() {
@@ -304,6 +347,7 @@ impl Client {
         })
     }
 
+    /// Whether the connection to the service is still open.
     pub fn is_connected(&self) -> bool {
         self.connected.load(Ordering::Relaxed)
     }
@@ -313,6 +357,7 @@ impl Client {
         self.latest.lock().ok().and_then(|s| s.clone())
     }
 
+    /// Sends a command to the service.
     pub fn send(&self, msg: &ToService) -> io::Result<()> {
         let line = serde_json::to_string(msg).map_err(io::Error::other)?;
         let mut w = self

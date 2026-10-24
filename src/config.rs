@@ -48,12 +48,16 @@ const MIN_REPEAT_MS: u32 = 30;
 
 #[derive(Debug, Default, Deserialize, Clone, Serialize)]
 #[serde(deny_unknown_fields)]
+/// The configuration file as written, before validation (see the module documentation).
 pub struct RawConfig {
     #[serde(default)]
+    /// `[general]`.
     pub general: General,
     #[serde(default)]
+    /// `[logging]`.
     pub logging: Logging,
     #[serde(default, rename = "profile", skip_serializing_if = "Vec::is_empty")]
+    /// `[[profile]]` blocks, in file order.
     pub profiles: Vec<RawProfile>,
     /// `[macros.<name>]` blocks, usable from any button.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -64,6 +68,7 @@ pub struct RawConfig {
 #[derive(Debug, Deserialize, Clone, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RawMacro {
+    /// Steps run in order.
     pub steps: Vec<RawStep>,
 }
 
@@ -125,33 +130,48 @@ impl Default for Logging {
 
 #[derive(Debug, Default, Deserialize, Clone, Serialize)]
 #[serde(deny_unknown_fields)]
+/// One `[[profile]]` block as written (see [`Profile`] for the meaning of each setting).
 pub struct RawProfile {
+    /// Name shown in logs and in the settings window.
     pub name: String,
     #[serde(default, rename = "match")]
+    /// Which devices this profile is for.
     pub matcher: Match,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Pointer speed multiplier, 0.18–2.0 (1.0 = normal).
     pub pointer_speed: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Sensor resolution.
     pub dpi: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// High-resolution scrolling on/off.
     pub hires_wheel: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Reverse the scroll direction.
     pub invert_wheel: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// SmartShift wheel mode.
     pub smartshift: Option<RawSmartShift>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Reverse the thumb wheel.
     pub thumb_wheel_invert: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Report rate in Hz.
     pub report_rate: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// What F1–F12 do without Fn.
     pub function_keys: Option<FunctionKeys>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Keys to disable, by name (`capslock`, `insert`...).
     pub disable_keys: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Keyboard backlight.
     pub backlight: Option<RawBacklight>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    /// Button name (`back`, `"0x00C3"`...) → action.
     pub buttons: BTreeMap<String, RawAction>,
     #[serde(default, rename = "app", skip_serializing_if = "Vec::is_empty")]
+    /// `[[profile.app]]` blocks: per-program buttons.
     pub apps: Vec<RawApp>,
 }
 
@@ -159,13 +179,16 @@ pub struct RawProfile {
 #[derive(Debug, Deserialize, Clone, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RawSmartShift {
+    /// Wheel behaviour.
     pub mode: SmartShiftMode,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// `smart` mode: speed above which the wheel spins freely (1–254).
     pub threshold: Option<u8>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+/// SmartShift setting as written in the file.
 pub enum SmartShiftMode {
     /// Ratchet that frees itself when scrolling fast.
     Smart,
@@ -179,8 +202,10 @@ pub enum SmartShiftMode {
 #[derive(Debug, Deserialize, Clone, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RawBacklight {
+    /// Backlight mode.
     pub mode: BacklightMode,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// `manual` mode: brightness level (0 = lowest).
     pub level: Option<u8>,
 }
 
@@ -213,8 +238,10 @@ pub enum FunctionKeys {
 #[serde(deny_unknown_fields)]
 pub struct RawApp {
     #[serde(rename = "match")]
+    /// Program file names (`chrome.exe`, `.exe` optional).
     pub programs: Vec<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    /// Button name → action while one of these programs is in front.
     pub buttons: BTreeMap<String, RawAction>,
 }
 
@@ -230,6 +257,7 @@ pub struct Match {
 }
 
 impl Match {
+    /// Whether a device with this `name` and `kind` fits every rule.
     pub fn fits(&self, name: &str, kind: DeviceKind) -> bool {
         let name_ok = self
             .name
@@ -242,61 +270,101 @@ impl Match {
 
 #[derive(Debug, Deserialize, Clone, Serialize)]
 #[serde(tag = "action", rename_all = "kebab-case")]
+/// A button action as written in the file (`action = "..."` plus its fields).
 pub enum RawAction {
+    /// Press a shortcut.
     Keys {
+        /// Keys joined by `+`, e.g. `Ctrl+Shift+T`.
         keys: String,
     },
+    /// Act as another mouse button.
     Click {
+        /// Which button.
         button: MouseButton,
     },
+    /// Start a program.
     Command {
+        /// Program to run (path or name on the PATH).
         command: String,
         #[serde(default)]
+        /// Command-line arguments.
         args: Vec<String>,
     },
+    /// Slow mode via pointer speed.
     TogglePointerSpeed {
+        /// Speed multiplier while active.
         speed: f32,
     },
+    /// Slow mode via DPI.
     ToggleDpi {
+        /// DPI while active.
         dpi: u16,
     },
+    /// Next DPI value at each press.
     CycleDpi {
+        /// The values, in order.
         dpi: Vec<u16>,
     },
+    /// Scroll by wheel notches.
     Scroll {
+        /// Which way.
         direction: ScrollDirection,
         #[serde(default = "one")]
+        /// Number of notches (default 1).
         amount: u8,
     },
+    /// Easy-Switch to another computer.
     ChangeHost {
+        /// Computer 1–3 or "next".
         host: RawHost,
         #[serde(default)]
+        /// Move every connected device, not just this one.
         all: bool,
     },
+    /// A sequence of steps written on the button.
     Sequence {
+        /// The steps.
         steps: Vec<RawStep>,
+        /// Repeat every this many ms while held.
         repeat: Option<u32>,
     },
+    /// Run a macro from `[macros]`.
     Macro {
+        /// Name of the macro.
         name: String,
+        /// Repeat every this many ms while held.
         repeat: Option<u32>,
     },
+    /// Change the screen brightness.
     Brightness {
+        /// Change by this percentage (±).
         change: Option<i8>,
+        /// Set to this percentage.
         set: Option<u8>,
     },
+    /// Change the keyboard backlight.
     Backlight {
+        /// Up, down or toggle.
         change: BacklightChange,
     },
+    /// Hold the button and move.
     Gesture {
+        /// Action for an upward movement.
         up: Option<Box<RawAction>>,
+        /// Action for a downward movement.
         down: Option<Box<RawAction>>,
+        /// Action for a movement to the left.
         left: Option<Box<RawAction>>,
+        /// Action for a movement to the right.
         right: Option<Box<RawAction>>,
+        /// Action for a press without movement.
         click: Option<Box<RawAction>>,
+        /// Movement needed, in device counts (default 50).
         threshold: Option<u16>,
     },
+    /// Do nothing.
     Disable,
+    /// Normal behaviour (the button is not remapped).
     Default,
 }
 
@@ -306,10 +374,15 @@ fn one() -> u8 {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
+/// Scroll direction.
 pub enum ScrollDirection {
+    /// Scroll up.
     Up,
+    /// Scroll down.
     Down,
+    /// Scroll left.
     Left,
+    /// Scroll right.
     Right,
 }
 
@@ -317,7 +390,9 @@ pub enum ScrollDirection {
 #[derive(Debug, Deserialize, Clone, Serialize)]
 #[serde(untagged)]
 pub enum RawHost {
+    /// Computer number 1–3.
     Number(u8),
+    /// `"next"`.
     Name(String),
 }
 
@@ -326,16 +401,22 @@ pub enum RawHost {
 #[serde(deny_unknown_fields)]
 pub struct RawStep {
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Press and release a shortcut.
     pub keys: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Press keys and keep them down.
     pub press: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Release keys pressed with `press`.
     pub release: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Type text.
     pub text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Click a mouse button.
     pub click: Option<MouseButton>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Wait, in milliseconds.
     pub delay: Option<u32>,
 }
 
@@ -343,8 +424,11 @@ pub struct RawStep {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BacklightChange {
+    /// One level brighter.
     Up,
+    /// One level darker.
     Down,
+    /// Switch on / off.
     Toggle,
 }
 
@@ -357,8 +441,11 @@ pub enum BacklightChange {
 pub struct Config {
     /// Directory containing the configuration file.
     pub base_dir: PathBuf,
+    /// `[general]` settings.
     pub general: General,
+    /// `[logging]` settings.
     pub logging: Logging,
+    /// Profiles, in priority order.
     pub profiles: Vec<Profile>,
     /// Validated `[macros]`, by name.
     pub macros: BTreeMap<String, Vec<Step>>,
@@ -367,14 +454,21 @@ pub struct Config {
 /// One validated `[[profile]]`.
 #[derive(Debug)]
 pub struct Profile {
+    /// Name shown in logs and in the settings window.
     pub name: String,
+    /// Which devices this profile is for.
     pub matcher: Match,
     /// Raw firmware units (256 = 1.0×).
     pub pointer_speed: Option<u16>,
+    /// Sensor resolution to set.
     pub dpi: Option<u16>,
+    /// High-resolution scrolling on/off.
     pub hires_wheel: Option<bool>,
+    /// Reverse the scroll direction.
     pub invert_wheel: Option<bool>,
+    /// SmartShift mode to set.
     pub smartshift: Option<SmartShift>,
+    /// Reverse the thumb wheel.
     pub thumb_wheel_invert: Option<bool>,
     /// Report rate in Hz.
     pub report_rate: Option<u16>,
@@ -407,15 +501,30 @@ pub enum Action {
     /// Press this mouse button for as long as the button is held.
     Click(MouseButton),
     /// Start a program when the button is pressed.
-    Command { program: String, args: Vec<String> },
+    Command {
+        /// Program to run.
+        program: String,
+        /// Command-line arguments.
+        args: Vec<String>,
+    },
     /// "Slow mode": switch between the normal value and this one.
     Toggle(SlowMode),
     /// Step through these DPI values, one per press.
     CycleDpi(Vec<u16>),
     /// Scroll by whole wheel notches (positive = up / right).
-    Scroll { vertical: i32, horizontal: i32 },
+    Scroll {
+        /// Notches up (positive) or down (negative).
+        vertical: i32,
+        /// Notches right (positive) or left (negative).
+        horizontal: i32,
+    },
     /// Easy-Switch to another computer; `all` = every connected device.
-    ChangeHost { target: HostTarget, all: bool },
+    ChangeHost {
+        /// Which computer.
+        target: HostTarget,
+        /// Move every connected device, not just this one.
+        all: bool,
+    },
     /// Several steps in a row (macro).
     Sequence(Macro),
     /// Change the screen brightness.
@@ -440,6 +549,7 @@ pub enum SlowMode {
 /// Target of a `change-host` action.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HostTarget {
+    /// The computer after the current one (wrapping around).
     Next,
     /// Host counted from 0.
     Index(u8),
@@ -450,6 +560,7 @@ pub enum HostTarget {
 pub struct Macro {
     /// Name, when it comes from `[macros]` (for the log).
     pub name: Option<String>,
+    /// The steps, in order.
     pub steps: Vec<Step>,
     /// Run again every this many ms while the button is held.
     pub repeat: Option<u32>,
@@ -462,16 +573,22 @@ pub enum Step {
     Keys(Vec<&'static Key>),
     /// Press keys and keep them down (released by `Release` or at the end).
     Press(Vec<&'static Key>),
+    /// Release keys pressed earlier.
     Release(Vec<&'static Key>),
+    /// Type text.
     Text(String),
+    /// Click a mouse button.
     Click(MouseButton),
+    /// Wait, in milliseconds.
     Delay(u32),
 }
 
 /// Screen brightness change, in percent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BrightnessChange {
+    /// Change by this percentage (±).
     By(i8),
+    /// Set to this percentage.
     To(u8),
 }
 
@@ -479,10 +596,15 @@ pub enum BrightnessChange {
 /// press without (enough) movement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Gesture {
+    /// Action for an upward movement.
     pub up: Option<Action>,
+    /// Action for a downward movement.
     pub down: Option<Action>,
+    /// Action for a movement to the left.
     pub left: Option<Action>,
+    /// Action for a movement to the right.
     pub right: Option<Action>,
+    /// Action for a press without movement.
     pub click: Option<Action>,
     /// Minimum movement, in device counts.
     pub threshold: u16,

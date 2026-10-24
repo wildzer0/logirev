@@ -21,6 +21,9 @@ cable or Bluetooth. It was built and tested with an **MX Ergo S** trackball.
 - **Keyboards** — F-keys or media keys, disable Caps Lock & co., backlight.
 - **Easy-Switch** — send a device (or all of them together) to another
   computer, from the app or with a button.
+- **Pair and remove devices** — connect a new mouse or keyboard to your
+  Bolt or Unifying receiver right from the app (no Logi Options+, no web
+  page), or free a slot.
 - **Battery at a glance**, and a **notification when it gets low**.
 - **Plug & play** — devices are set up the moment they connect or wake up.
 - **Light** — the background part uses just a few MB of memory and no
@@ -41,11 +44,12 @@ cable or Bluetooth. It was built and tested with an **MX Ergo S** trackball.
 
 1. [Getting started on Windows](#getting-started-on-windows)
 2. [Using the app](#using-the-app)
-3. [Questions and answers](#questions-and-answers)
-4. [When something does not work](#when-something-does-not-work)
-5. [Linux](#linux)
-6. [More documentation](#more-documentation)
-7. [License](#license)
+3. [Pairing a new device](#pairing-a-new-device)
+4. [Questions and answers](#questions-and-answers)
+5. [When something does not work](#when-something-does-not-work)
+6. [Linux](#linux)
+7. [More documentation](#more-documentation)
+8. [License](#license)
 
 ---
 
@@ -101,6 +105,36 @@ working. Right-click it for more options, including *Quit*.
 | | |
 |---|---|
 | ![Settings](docs/images/settings.png) | Everything is also stored in a plain text file, `logirev.toml`, next to the program. You never need to open it, but you can: see [docs/CONFIGURATION.md](docs/CONFIGURATION.md). |
+
+---
+
+## Pairing a new device
+
+A Bolt or Unifying receiver can hold up to **6** devices. To add one:
+
+1. Open the app. Next to your receiver, click **Pair a new device**.
+2. Put the new device in pairing mode:
+   - **Bolt:** press and hold its connect / Easy-Switch button until the
+     light blinks fast. The device appears in the list: click **Pair**.
+   - **Unifying:** just turn it on (or press its connect button).
+3. **Bolt only — prove it is yours** (so nobody nearby can pair their
+   device with your receiver):
+   - **keyboard:** type the 6-digit code shown and press Enter;
+   - **mouse / trackball:** click the buttons in the order shown (left,
+     right, ...), then press left and right together.
+
+   ![Clicking the pairing code](docs/images/pairing.png)
+4. Done: the device appears in the list and is set up immediately.
+
+**Removing a device:** right-click its card (or open it) and choose
+**Remove pairing**. The device stops working with this receiver until you
+pair it again — useful to free a slot or to clean up duplicates.
+
+From the command line: `logirevctl pair` and `logirevctl unpair <slot>`
+(the slot numbers are shown by `logirevctl scan`).
+
+> Lightspeed (gaming) receivers are paired at the factory and cannot pair
+> other devices.
 
 ---
 
@@ -184,6 +218,7 @@ window can be built from source with `cargo build --release`).
 
 | Document | For whom |
 |---|---|
+| [Code documentation](https://wildzer0.github.io/logirev/) | developers: every module and function, generated with `cargo doc` |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | the settings file, every option explained |
 | [docs/PROTOCOL.md](docs/PROTOCOL.md) | the curious: how logirev talks to the device |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | developers: building, code layout, releasing |

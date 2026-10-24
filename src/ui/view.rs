@@ -9,16 +9,24 @@ use crate::status::{DeviceStatus, Snapshot};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(usize)]
 pub enum Command {
+    /// Open the settings window (or the native device list).
     ShowDevices = 1,
+    /// Open the configuration file.
     EditSettings,
+    /// Open the log file.
     OpenLog,
+    /// Open the program folder.
     OpenFolder,
+    /// Re-read the configuration now.
     Reload,
+    /// Toggle start with Windows.
     Autostart,
+    /// Stop logirev.
     Quit,
 }
 
 impl Command {
+    /// Every command, in menu order.
     pub const ALL: [Command; 7] = [
         Command::ShowDevices,
         Command::EditSettings,
@@ -34,6 +42,7 @@ impl Command {
         self as usize
     }
 
+    /// The command with menu id `id`.
     pub fn from_id(id: usize) -> Option<Self> {
         Self::ALL.into_iter().find(|c| c.id() == id)
     }
@@ -45,11 +54,15 @@ const HOST_ID_BASE: usize = 1000;
 /// What a picked menu id means.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Picked {
+    /// A fixed command.
     Command(Command),
     /// Send the device in `slot` of link `link` to computer `host` (from 0).
     SendTo {
+        /// Receiver, as `LinkStatus::key`.
         link: String,
+        /// Receiver slot of the device.
         slot: u8,
+        /// Target computer, counted from 0.
         host: u8,
     },
 }
@@ -57,8 +70,11 @@ pub enum Picked {
 /// One item of a submenu.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MenuItem {
+    /// Menu id (decode with [`decode`]).
     pub id: usize,
+    /// Text shown.
     pub label: String,
+    /// Show a tick.
     pub checked: bool,
 }
 
@@ -91,18 +107,27 @@ pub enum MenuEntry {
     /// A device; checked when connected. Clicking opens the device window.
     /// A tab separates the name from the right-aligned status.
     Device {
+        /// Text shown (a tab separates name and status).
         label: String,
+        /// Connected (shown with a tick).
         online: bool,
     },
+    /// A horizontal line.
     Separator,
+    /// A command.
     Command {
+        /// What it does.
         command: Command,
+        /// Text shown.
         label: &'static str,
+        /// Show a tick.
         checked: bool,
     },
     /// A line opening a submenu.
     Submenu {
+        /// Text of the line opening the submenu.
         label: String,
+        /// The submenu items.
         items: Vec<MenuItem>,
     },
 }
@@ -280,6 +305,8 @@ mod tests {
                 key: "bolt".into(),
                 name: "Bolt receiver (046d:c548)".into(),
                 is_receiver: true,
+                can_pair: true,
+                pairing: None,
                 devices: vec![
                     dev(1, "Wave Keys", false, None),
                     dev(2, "MX Ergo S", true, Some("30%")),

@@ -21,7 +21,9 @@ pub use keys::{Key, MouseButton};
 
 /// Something that can press and release keys and mouse buttons.
 pub trait Injector {
+    /// Presses (`down`) or releases a key.
     fn key(&mut self, key: &Key, down: bool) -> io::Result<()>;
+    /// Presses (`down`) or releases a mouse button.
     fn button(&mut self, button: MouseButton, down: bool) -> io::Result<()>;
     /// Turns the wheel by whole notches (positive = up / right).
     fn scroll(&mut self, vertical: i32, horizontal: i32) -> io::Result<()>;

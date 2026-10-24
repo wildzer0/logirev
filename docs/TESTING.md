@@ -148,6 +148,21 @@ latest published release (e.g. set `version = "0.9.0"` locally).
 | M6 | Untick *Check for updates automatically* | No more update notifications; *Check now* still works. |
 | M7 | Read-only folder (e.g. under `C:\Program Files`) | *Update now* fails with a clear message; the old version keeps working. |
 
+## N. Pairing (1.1)
+
+| # | Do | Expect |
+|---|---|---|
+| N1 | *Devices* → *Pair a new device* next to the Bolt receiver | Assistant opens: "Press and hold the connect button..." with a spinner. |
+| N2 | Hold the Easy-Switch button of a device paired elsewhere (or just unpaired) until it blinks fast | The device appears in the list with its name; *Pair*. |
+| N3 | Keyboard | A 6-digit code appears; typing it + Enter → "Done! ... slot N"; the counter advances while typing. |
+| N4 | Mouse / trackball | A sequence of 10 Left/Right boxes; clicking them turns them green; then left+right together → "Done!". |
+| N5 | After pairing | The new device appears in the list and is configured (log `connected ... applying profile`). |
+| N6 | *Cancel* during discovery | Assistant closes; the receiver stops listening. |
+| N7 | Wait 30 s without a device | "The pairing did not work: no device answered in time" with *Try again*. |
+| N8 | Right-click the duplicate *Wave Keys* card → *Remove pairing* → confirm | The slot disappears from the list (and from `logirevctl scan`). |
+| N9 | `logirevctl unpair 3` / `logirevctl pair` (service running) | Same results from the terminal; the window updates. |
+| N10 | Unifying receiver (if available) | *Pair a new device* → turn on the device → "Done!". |
+
 ## J. Command-line tools
 
 | # | Do | Expect |

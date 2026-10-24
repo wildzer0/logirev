@@ -203,10 +203,15 @@ pub fn char_to_key(c: char) -> Option<(&'static Key, bool)> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MouseButton {
+    /// Primary (left) button.
     Left,
+    /// Secondary (right) button.
     Right,
+    /// Middle button (wheel click).
     Middle,
+    /// Back side button.
     Back,
+    /// Forward side button.
     Forward,
 }
 

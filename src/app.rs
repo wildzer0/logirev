@@ -41,10 +41,13 @@ pub struct ServiceOptions {
 
 /// Everything the daemon needs, ready to go.
 pub struct Prepared {
+    /// The validated configuration.
     pub cfg: Config,
+    /// Where the configuration was read from (watched for changes).
     pub config_path: PathBuf,
     /// Resolved log file path, if logging to a file.
     pub log_file: Option<PathBuf>,
+    /// The open Wireshark capture, if one was requested.
     pub pcap: Option<Arc<Mutex<PcapWriter>>>,
     /// Held for the lifetime of the service (single instance).
     pub instance: InstanceGuard,

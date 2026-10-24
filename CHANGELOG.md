@@ -3,6 +3,19 @@
 All notable changes are listed here. Versions follow
 [Semantic Versioning](https://semver.org).
 
+## [1.1.0] — unreleased
+
+### Added
+- **Pairing**: add devices to a Bolt or Unifying receiver without Logi
+  Options+ or the Logi web app. In the window: *Pair a new device* next to
+  the receiver, with a guided assistant (Bolt discovery, typed code for
+  keyboards, click sequence for mice). From the command line:
+  `logirevctl pair`.
+- **Remove pairing** (right-click a device card, or the device page;
+  `logirevctl unpair <slot>`).
+- **Code documentation** generated with rustdoc, including the guides, and
+  published on GitHub Pages; the build now refuses undocumented items.
+
 ## [1.0.0] — 2026-10-24
 
 ### Added
@@ -38,7 +51,7 @@ All notable changes are listed here. Versions follow
   external monitors via DDC/CI, laptop panels via Windows WMI, Linux
   kernel backlight.
 - Easy-Switch: computer names (feature 0x1815) in `scan` and in the devices
-  window; tray submenu *Send <device> to ▸ Computer N*; `change-host` with
+  window; tray submenu *Send `<device>` to ▸ Computer N*; `change-host` with
   `all = true` sends every connected device at once.
 - Named macros in `[macros.<name>]`, used with `{ action = "macro" }`;
   `press` / `release` steps to hold keys; `repeat = <ms>` repeats a macro or

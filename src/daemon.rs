@@ -49,12 +49,14 @@ use crate::hidpp::features::{
     DISABLE_KEY_NAMES,
 };
 use crate::hidpp::frame::{Frame, HidppError, RECEIVER_INDEX, REPORT_SHORT, SOFTWARE_ID};
+use crate::hidpp::pairing::{Family, Pairing, Stage};
 use crate::hidpp::receiver::{paired_devices, PairedDevice};
 use crate::hidpp::transport::{self, Incoming, Transport, Waker};
 use crate::input::{self, Injector, Key};
 use crate::pcap::PcapWriter;
 use crate::status::{
-    ControlInfo, DeviceDetails, DeviceStatus, HostsStatus, LinkStatus, Snapshot, UiHooks, UiUpdate,
+    ControlInfo, DeviceDetails, DeviceStatus, HostsStatus, LinkStatus, PairingStatus, Snapshot,
+    UiHooks, UiUpdate,
 };
 
 /// HID++ 1.0 notification sent by a receiver when a device (dis)connects.
@@ -100,7 +102,38 @@ pub enum Event {
     Foreground(String),
     /// Send one device to another computer (from the tray menu):
     /// `link` = [`LinkStatus::key`], `host` counted from 0.
-    ChangeHost { link: String, slot: u8, host: u8 },
+    ChangeHost {
+        /// Receiver, as [`LinkStatus::key`].
+        link: String,
+        /// Receiver slot of the device.
+        slot: u8,
+        /// Target computer, counted from 0.
+        host: u8,
+    },
+    /// Put a receiver in pairing mode.
+    StartPairing {
+        /// Receiver, as [`LinkStatus::key`].
+        link: String,
+    },
+    /// Bolt: pair the `index`-th device found.
+    ChoosePairing {
+        /// Receiver, as [`LinkStatus::key`].
+        link: String,
+        /// Position in the list of devices found.
+        index: usize,
+    },
+    /// Stop pairing (or forget a finished session).
+    StopPairing {
+        /// Receiver, as [`LinkStatus::key`].
+        link: String,
+    },
+    /// Remove the device in `slot` from the receiver.
+    Unpair {
+        /// Receiver, as [`LinkStatus::key`].
+        link: String,
+        /// Receiver slot of the device to remove.
+        slot: u8,
+    },
     /// A newer version is published (from the update checker).
     UpdateAvailable(String),
     /// Stop: restore every device and return.
@@ -235,6 +268,27 @@ impl Daemon {
                     Event::ChangeHost { link, slot, host } => {
                         if let Some(l) = self.links.iter_mut().find(|l| l.key == link) {
                             l.change_host(slot, HostTarget::Index(host));
+                        }
+                    }
+                    Event::StartPairing { link } => {
+                        if let Some(l) = self.links.iter_mut().find(|l| l.key == link) {
+                            l.start_pairing();
+                        }
+                    }
+                    Event::ChoosePairing { link, index } => {
+                        if let Some(l) = self.links.iter_mut().find(|l| l.key == link) {
+                            l.choose_pairing(index);
+                        }
+                    }
+                    Event::StopPairing { link } => {
+                        if let Some(l) = self.links.iter_mut().find(|l| l.key == link) {
+                            l.stop_pairing();
+                        }
+                    }
+                    Event::Unpair { link, slot } => {
+                        let mut ctx = ctx!(self);
+                        if let Some(l) = self.links.iter_mut().find(|l| l.key == link) {
+                            l.unpair(&mut ctx, slot);
                         }
                     }
                     Event::Hid => {}
@@ -534,6 +588,8 @@ struct Link {
     lost: Option<String>,
     /// Something the interface shows changed.
     changed: bool,
+    /// A pairing session in progress (or just finished).
+    pairing: Option<Pairing>,
 }
 
 impl Link {
@@ -547,6 +603,7 @@ impl Link {
             battery_warned: BTreeSet::new(),
             lost: None,
             changed: true,
+            pairing: None,
         }
     }
 
@@ -594,6 +651,12 @@ impl Link {
             name: self.t.name.clone(),
             is_receiver: self.t.is_receiver,
             devices,
+            can_pair: Family::of(self.t.pid).is_some(),
+            pairing: self.pairing.as_ref().map(|p| PairingStatus {
+                family: p.family,
+                stage: p.stage.clone(),
+                found: p.found.clone(),
+            }),
         }
     }
 
@@ -652,6 +715,9 @@ impl Link {
             }
             self.run_due_setups(ctx);
             self.run_due_repeats(ctx);
+            if self.pairing.as_mut().is_some_and(Pairing::check_timeout) {
+                self.changed = true;
+            }
             // Setups and actions may have set notifications aside.
             if !self.t.has_pending() {
                 return;
@@ -661,6 +727,20 @@ impl Link {
 
     fn on_frame(&mut self, ctx: &mut Ctx, f: &Frame) {
         let slot = f.device_index();
+
+        // Pairing notifications (the frame is still handled normally below:
+        // a newly paired device must also be configured).
+        if let Some(p) = self.pairing.as_mut() {
+            if p.on_frame(f) {
+                self.changed = true;
+                if let Stage::Paired { slot: new } = p.stage {
+                    info!("paired a new device in slot {new}");
+                    self.paired = paired_devices(&mut self.t);
+                } else if let Stage::Failed { reason } = &p.stage {
+                    warn!("pairing failed: {reason}");
+                }
+            }
+        }
 
         // Receiver: a device connected or disconnected.
         if self.t.is_receiver && f.report_id() == REPORT_SHORT && f.b2() == NOTIF_DEVICE_CONNECTION
@@ -994,6 +1074,69 @@ impl Link {
             }
             Err(e) => warn!("slot {slot}: cannot change the backlight: {e}"),
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Pairing
+    // ------------------------------------------------------------------
+
+    fn start_pairing(&mut self) {
+        if let Some(mut old) = self.pairing.take() {
+            old.cancel(&mut self.t);
+        }
+        let known: Vec<u8> = self
+            .paired
+            .iter()
+            .map(|p| p.slot)
+            .chain(self.sessions.keys().copied())
+            .collect();
+        match Pairing::start(&mut self.t, known) {
+            Ok(p) => {
+                info!("{}: pairing mode on ({:?})", self.t.name, p.family);
+                self.pairing = Some(p);
+            }
+            Err(e) => {
+                warn!("{}: cannot start pairing: {e}", self.t.name);
+                self.pairing = None;
+            }
+        }
+        self.changed = true;
+    }
+
+    fn choose_pairing(&mut self, index: usize) {
+        let Some(p) = self.pairing.as_mut() else {
+            return;
+        };
+        if let Err(e) = p.choose(&mut self.t, index) {
+            warn!("cannot pair the chosen device: {e}");
+            p.stage = Stage::Failed {
+                reason: e.to_string(),
+            };
+        }
+        self.changed = true;
+    }
+
+    fn stop_pairing(&mut self) {
+        if let Some(mut p) = self.pairing.take() {
+            p.cancel(&mut self.t);
+            self.changed = true;
+        }
+    }
+
+    /// Removes the device in `slot` from the receiver.
+    fn unpair(&mut self, ctx: &mut Ctx, slot: u8) {
+        match crate::hidpp::pairing::unpair(&mut self.t, slot) {
+            Ok(()) => {
+                info!("{}: removed the device in slot {slot}", self.t.name);
+                if let Some(s) = self.sessions.remove(&slot) {
+                    release_session(ctx, &s);
+                }
+                self.pending.remove(&slot);
+                self.paired = paired_devices(&mut self.t);
+            }
+            Err(e) => warn!("{}: cannot remove slot {slot}: {e}", self.t.name),
+        }
+        self.changed = true;
     }
 
     /// Easy-Switch: sends the device to another computer.
