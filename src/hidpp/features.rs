@@ -752,7 +752,7 @@ impl DpiChoices {
         match self {
             Self::Values(v) => v.contains(&dpi),
             Self::Range { min, max, step } => {
-                (*min..=*max).contains(&dpi) && (*step == 0 || (dpi - min) % step == 0)
+                (*min..=*max).contains(&dpi) && (*step == 0 || (dpi - min).is_multiple_of(*step))
             }
         }
     }

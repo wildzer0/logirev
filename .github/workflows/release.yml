@@ -27,11 +27,15 @@ jobs:
             os: windows-latest
             target: x86_64-pc-windows-msvc
             exe: .exe
+            features: ""
           - name: linux-x64
             os: ubuntu-latest
             # musl: a fully static binary that runs on any Linux distribution.
+            # Static binaries cannot load the system's graphics libraries, so
+            # the Linux build has no settings window (headless service).
             target: x86_64-unknown-linux-musl
             exe: ""
+            features: --no-default-features
     steps:
       - uses: actions/checkout@v4
 
@@ -56,7 +60,7 @@ jobs:
         run: cargo test --locked
 
       - name: Build
-        run: cargo build --release --locked --target ${{ matrix.target }}
+        run: cargo build --release --locked --target ${{ matrix.target }} ${{ matrix.features }}
 
       - name: Package
         shell: bash

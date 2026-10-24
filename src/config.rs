@@ -161,7 +161,7 @@ pub struct RawSmartShift {
     pub threshold: Option<u8>,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum SmartShiftMode {
     /// Ratchet that frees itself when scrolling fast.
@@ -231,8 +231,8 @@ impl Match {
         let name_ok = self
             .name
             .as_ref()
-            .map_or(true, |n| name.to_lowercase().contains(&n.to_lowercase()));
-        let kind_ok = self.kind.map_or(true, |k| k == kind);
+            .is_none_or(|n| name.to_lowercase().contains(&n.to_lowercase()));
+        let kind_ok = self.kind.is_none_or(|k| k == kind);
         name_ok && kind_ok
     }
 }

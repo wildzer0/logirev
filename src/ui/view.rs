@@ -161,7 +161,12 @@ pub fn menu(snapshot: &Snapshot, autostart: bool, has_log: bool) -> Vec<MenuEntr
         label,
         checked: false,
     };
-    out.push(cmd(Command::ShowDevices, "Show devices..."));
+    let show = if cfg!(feature = "gui") {
+        "Open logirev..."
+    } else {
+        "Show devices..."
+    };
+    out.push(cmd(Command::ShowDevices, show));
     out.push(cmd(Command::EditSettings, "Edit settings"));
     out.push(cmd(Command::Reload, "Reload settings"));
     if has_log {

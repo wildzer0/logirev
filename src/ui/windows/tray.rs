@@ -44,6 +44,7 @@ impl Tray {
     }
 
     /// The application icon (also used for windows).
+    #[cfg(not(feature = "gui"))]
     pub fn icon(&self) -> HICON {
         self.icon
     }

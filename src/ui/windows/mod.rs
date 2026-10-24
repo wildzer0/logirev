@@ -20,6 +20,9 @@
 //! borrowed across such calls: handlers copy what they need, release the
 //! borrow, and only then open a menu or a message box.
 
+// The native devices window is only used when the settings window (egui)
+// is not built in.
+#[cfg(not(feature = "gui"))]
 mod devices;
 mod tray;
 mod util;
@@ -52,6 +55,7 @@ use crate::daemon::{self, Event};
 use crate::instance::InstanceGuard;
 use crate::status::{Snapshot, UiHooks, UiUpdate};
 use crate::ui::view::{self, Command, Picked};
+#[cfg(not(feature = "gui"))]
 use devices::DevicesWindow;
 use tray::Tray;
 
@@ -69,6 +73,7 @@ type Queue = Arc<Mutex<VecDeque<UiUpdate>>>;
 struct State {
     hwnd: HWND,
     tray: Tray,
+    #[cfg(not(feature = "gui"))]
     devices: Option<DevicesWindow>,
     snapshot: Snapshot,
     queue: Queue,
@@ -81,6 +86,9 @@ struct State {
     taskbar_created: u32,
     /// Error that stopped the daemon, reported as the exit status.
     failure: Option<String>,
+    /// The configuration file was given with `--config`.
+    #[cfg(feature = "gui")]
+    custom_config: bool,
     _instance: InstanceGuard,
 }
 
@@ -90,8 +98,15 @@ thread_local! {
 
 /// Runs the tray application until the user picks "Quit" or logs off.
 pub fn run(opts: &ServiceOptions) -> ExitCode {
+    let config_path = opts.config.clone().unwrap_or_else(app::default_config_path);
+    let first_run = !config_path.exists();
     let prepared = match app::prepare(opts, false) {
         Ok(p) => p,
+        Err(e) if e.contains("already running") && cfg!(feature = "gui") => {
+            // Started again while running: the user wants the window.
+            open_settings(opts.config.as_deref());
+            return ExitCode::SUCCESS;
+        }
         Err(e) if e.contains("already running") => {
             message_box(
                 "logirev",
@@ -106,6 +121,7 @@ pub fn run(opts: &ServiceOptions) -> ExitCode {
         }
     };
     match start(prepared, opts) {
+        Ok(()) if first_run && cfg!(feature = "gui") => open_settings(opts.config.as_deref()),
         Ok(()) => {}
         Err(e) => {
             error!("{e}");
@@ -141,7 +157,7 @@ pub fn run(opts: &ServiceOptions) -> ExitCode {
 /// Creates the windows, the tray icon and the daemon thread.
 fn start(p: Prepared, opts: &ServiceOptions) -> Result<(), String> {
     let class = util::wide("logirev.main");
-    let title = util::wide("logirev");
+    let title = util::wide("logirev-service");
     // SAFETY: window creation with valid, NUL-terminated strings.
     let (instance, hwnd) = unsafe {
         let instance = GetModuleHandleW(std::ptr::null());
@@ -175,10 +191,14 @@ fn start(p: Prepared, opts: &ServiceOptions) -> Result<(), String> {
     }
 
     let tray = Tray::new(hwnd, WM_APP_TRAY);
+    #[cfg(not(feature = "gui"))]
     let devices = DevicesWindow::create(instance, tray.icon());
+    #[cfg(not(feature = "gui"))]
     if devices.is_none() {
         warn!("cannot create the devices window");
     }
+    #[cfg(feature = "gui")]
+    let _ = instance;
     register_device_notifications(hwnd);
     // SAFETY: NUL-terminated string.
     let taskbar_created = unsafe { RegisterWindowMessageW(util::wide("TaskbarCreated").as_ptr()) };
@@ -233,6 +253,7 @@ fn start(p: Prepared, opts: &ServiceOptions) -> Result<(), String> {
         *s.borrow_mut() = Some(State {
             hwnd,
             tray,
+            #[cfg(not(feature = "gui"))]
             devices,
             snapshot: Snapshot::default(),
             queue,
@@ -240,6 +261,8 @@ fn start(p: Prepared, opts: &ServiceOptions) -> Result<(), String> {
             daemon: Some(daemon),
             config_path: p.config_path,
             log_file: p.log_file,
+            #[cfg(feature = "gui")]
+            custom_config: opts.config.is_some(),
             autostart_command,
             taskbar_created,
             failure: None,
@@ -247,6 +270,21 @@ fn start(p: Prepared, opts: &ServiceOptions) -> Result<(), String> {
         })
     });
     Ok(())
+}
+
+/// Starts the settings window (a separate `logirev --settings` process).
+fn open_settings(config: Option<&std::path::Path>) {
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let mut cmd = std::process::Command::new(exe);
+    cmd.arg("--settings");
+    if let Some(c) = config {
+        cmd.arg("--config").arg(c);
+    }
+    if let Err(e) = cmd.spawn() {
+        warn!("cannot open the settings window: {e}");
+    }
 }
 
 /// Asks Windows to tell us when a HID device (e.g. a receiver) is plugged in.
@@ -343,6 +381,7 @@ fn drain_updates() {
             match update {
                 UiUpdate::Snapshot(snap) => {
                     s.tray.set_tip(&snap.tooltip());
+                    #[cfg(not(feature = "gui"))]
                     if let Some(w) = &s.devices {
                         w.update(&snap);
                     }
@@ -390,6 +429,13 @@ fn show_menu(hwnd: HWND) {
 
 fn run_command(cmd: Command) {
     match cmd {
+        #[cfg(feature = "gui")]
+        Command::ShowDevices => {
+            if let Some(custom) = with_state(|s| s.custom_config.then(|| s.config_path.clone())) {
+                open_settings(custom.as_deref());
+            }
+        }
+        #[cfg(not(feature = "gui"))]
         Command::ShowDevices => {
             with_state(|s| {
                 if let Some(w) = &s.devices {

@@ -117,7 +117,7 @@ fn bmp_entry(size: u32) -> Vec<u8> {
             out.extend_from_slice(&[rgba[i + 2], rgba[i + 1], rgba[i], rgba[i + 3]]);
         }
     }
-    out.extend(std::iter::repeat(0u8).take(mask_stride * size as usize));
+    out.extend(std::iter::repeat_n(0u8, mask_stride * size as usize));
     out
 }
 

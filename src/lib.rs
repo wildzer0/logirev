@@ -21,6 +21,7 @@
 //! | [`config`] | reading and validating `logirev.toml` |
 //! | [`foreground`] | which program is in front (per-application buttons) |
 //! | [`icon`] | the application icon, drawn in code |
+//! | `gui` | the settings window (feature `gui`) |
 //! | [`hidpp`] | the HID++ protocol: wire format, transport, features, receivers |
 //! | [`input`] | synthetic keyboard/mouse input |
 //! | [`instance`] | single-instance lock |
@@ -38,6 +39,8 @@ pub mod brightness;
 pub mod config;
 pub mod daemon;
 pub mod foreground;
+#[cfg(feature = "gui")]
+pub mod gui;
 pub mod hidpp;
 pub mod icon;
 pub mod input;

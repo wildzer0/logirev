@@ -19,9 +19,15 @@ pub struct InstanceGuard {
     _file: std::fs::File,
 }
 
-/// Takes the lock, or fails with `AlreadyExists` if another copy holds it.
+/// Takes the service lock, or fails with `AlreadyExists` if another copy
+/// holds it.
 pub fn acquire() -> io::Result<InstanceGuard> {
-    imp::acquire()
+    imp::acquire("logirev")
+}
+
+/// Takes a lock with another name (e.g. one per settings window).
+pub fn acquire_named(name: &str) -> io::Result<InstanceGuard> {
+    imp::acquire(name)
 }
 
 fn already_running() -> io::Error {
@@ -34,8 +40,8 @@ mod imp {
     use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS};
     use windows_sys::Win32::System::Threading::CreateMutexW;
 
-    pub fn acquire() -> io::Result<InstanceGuard> {
-        let name: Vec<u16> = "Local\\logirev\0".encode_utf16().collect();
+    pub fn acquire(name: &str) -> io::Result<InstanceGuard> {
+        let name: Vec<u16> = format!("Local\\{name}\0").encode_utf16().collect();
         // SAFETY: `name` is a valid NUL-terminated UTF-16 string.
         let handle = unsafe { CreateMutexW(std::ptr::null(), 0, name.as_ptr()) };
         if handle.is_null() {
@@ -64,7 +70,7 @@ mod imp {
     use std::os::fd::AsRawFd;
     use std::path::PathBuf;
 
-    pub fn acquire() -> io::Result<InstanceGuard> {
+    pub fn acquire(name: &str) -> io::Result<InstanceGuard> {
         let dir = std::env::var_os("XDG_RUNTIME_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|| {
@@ -76,7 +82,7 @@ mod imp {
             .create(true)
             .truncate(false)
             .write(true)
-            .open(dir.join("logirev.lock"))?;
+            .open(dir.join(format!("{name}.lock")))?;
         // SAFETY: valid fd owned by `file`.
         if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
             let err = io::Error::last_os_error();
@@ -94,7 +100,7 @@ mod imp {
 mod imp {
     use super::*;
 
-    pub fn acquire() -> io::Result<InstanceGuard> {
+    pub fn acquire(_name: &str) -> io::Result<InstanceGuard> {
         Ok(InstanceGuard {})
     }
 }

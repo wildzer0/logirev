@@ -2,7 +2,7 @@
 name = "logirev"
 version = "0.4.0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.95"
 description = "Portable background daemon that configures Logitech HID++ devices (Bolt / Unifying receivers) without Logi Options+"
 readme = "README.md"
 license = "PolyForm-Noncommercial-1.0.0"
@@ -24,6 +24,8 @@ eframe = { version = "0.37", optional = true, default-features = false, features
 default = ["gui"]
 # Build the settings window into `logirev` (`logirev --settings`).
 gui = ["dep:eframe"]
+# Development only: `EFRAME_SCREENSHOT_TO=x.png` saves the window and exits.
+screenshot = ["gui", "eframe/__screenshot"]
 
 # Pure-Rust HID backends on every platform: no C toolchain, no system
 # libraries at runtime, so the produced binary is a single portable file.
@@ -37,8 +39,10 @@ hidapi = { version = "2.6", default-features = false, features = ["windows-nativ
 windows-sys = { version = "0.59", features = [
     "Win32_Devices_Display",
     "Win32_Foundation",
+    "Win32_Globalization",
     "Win32_Graphics_Gdi",
     "Win32_Security",
+    "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_LibraryLoader",
     "Win32_System_Registry",
     "Win32_System_Threading",

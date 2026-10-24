@@ -8,6 +8,8 @@
 //!   `logirevctl run` instead.
 //! * **Linux** — runs in the terminal or as a systemd user service.
 //!
+//! `logirev --settings` opens the settings window instead (feature `gui`).
+//!
 //! Diagnostic commands live in the companion program `logirevctl`.
 
 // No console window on Windows: the program lives in the notification area.
@@ -37,6 +39,22 @@ struct Cli {
     /// Write a Wireshark capture of the HID++ traffic to this file
     #[arg(long)]
     pcap: Option<PathBuf>,
+
+    /// Open the settings window instead of starting the service
+    #[arg(long)]
+    settings: bool,
+}
+
+/// Opens the settings window, if this build has one.
+fn settings(opts: &ServiceOptions) -> ExitCode {
+    #[cfg(feature = "gui")]
+    return logirev::gui::run(opts);
+    #[cfg(not(feature = "gui"))]
+    {
+        let _ = opts;
+        eprintln!("this build of logirev has no settings window (feature \"gui\")");
+        ExitCode::FAILURE
+    }
 }
 
 impl Cli {
@@ -53,6 +71,7 @@ impl Cli {
 fn main() -> ExitCode {
     // Without a console, argument errors and --help are shown in a window.
     match Cli::try_parse() {
+        Ok(cli) if cli.settings => settings(&cli.options()),
         Ok(cli) => logirev::ui::run(&cli.options()),
         Err(e) => {
             let ok = !e.use_stderr();
@@ -68,7 +87,11 @@ fn main() -> ExitCode {
 
 #[cfg(not(windows))]
 fn main() -> ExitCode {
-    let opts = Cli::parse().options();
+    let cli = Cli::parse();
+    if cli.settings {
+        return settings(&cli.options());
+    }
+    let opts = cli.options();
     match logirev::app::run_service(&opts) {
         Ok(()) => ExitCode::SUCCESS,
         Err(msg) => {
