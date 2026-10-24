@@ -16,8 +16,10 @@ use log::info;
 use crate::config::{self, Config};
 use crate::daemon::{self, Event};
 use crate::instance::{self, InstanceGuard};
+use crate::ipc;
 use crate::logging;
 use crate::pcap::PcapWriter;
+use crate::status::UiHooks;
 
 /// Name of the configuration file looked up next to the executable.
 pub const CONFIG_FILE: &str = "logirev.toml";
@@ -108,10 +110,30 @@ pub fn run_service(opts: &ServiceOptions) -> Result<(), String> {
     })
     .map_err(|e| format!("cannot install Ctrl+C handler: {e}"))?;
     crate::foreground::watch(tx.clone());
+    let ipc = start_ipc(&tx);
+    let hooks = ipc.clone().map(|server| UiHooks {
+        observer: Box::new(move |update| server.publish(&update)),
+        hotplug_events: false,
+    });
     info!("running; press Ctrl+C to stop");
-    let result = daemon::run(p.cfg, &p.config_path, p.pcap, tx, rx, None);
+    let result = daemon::run(p.cfg, &p.config_path, p.pcap, tx, rx, hooks);
+    if let Some(server) = ipc {
+        server.close();
+    }
     drop(p.instance);
     result
+}
+
+/// Opens the channel used by the settings window. A failure only disables
+/// the window's live view, so it is logged and otherwise ignored.
+pub fn start_ipc(tx: &mpsc::Sender<Event>) -> Option<ipc::Server> {
+    match ipc::Server::start(tx.clone()) {
+        Ok(server) => Some(server),
+        Err(e) => {
+            log::warn!("settings window channel unavailable: {e}");
+            None
+        }
+    }
 }
 
 /// Opens the size-limited capture file, if one is requested.

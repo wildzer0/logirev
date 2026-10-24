@@ -20,7 +20,6 @@
 //! borrowed across such calls: handlers copy what they need, release the
 //! borrow, and only then open a menu or a message box.
 
-mod autostart;
 mod devices;
 mod tray;
 mod util;
@@ -48,6 +47,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 pub use util::message_box;
 
 use crate::app::{self, Prepared, ServiceOptions};
+use crate::autostart;
 use crate::daemon::{self, Event};
 use crate::instance::InstanceGuard;
 use crate::status::{Snapshot, UiHooks, UiUpdate};
@@ -204,16 +204,26 @@ fn start(p: Prepared, opts: &ServiceOptions) -> Result<(), String> {
         }
     };
     crate::foreground::watch(tx.clone());
+    let ipc_for_daemon = app::start_ipc(&tx);
     let (cfg, config_path, pcap) = (p.cfg, p.config_path.clone(), p.pcap);
     let daemon_tx = tx.clone();
     let daemon = std::thread::Builder::new()
         .name("daemon".into())
         .spawn(move || {
+            let (to_ui, to_ipc) = (post.clone(), ipc_for_daemon.clone());
             let hooks = UiHooks {
-                observer: Box::new(post.clone()),
+                observer: Box::new(move |update| {
+                    if let Some(server) = &to_ipc {
+                        server.publish(&update);
+                    }
+                    to_ui(update);
+                }),
                 hotplug_events: true,
             };
             let result = daemon::run(cfg, &config_path, pcap, daemon_tx, rx, Some(hooks));
+            if let Some(server) = &ipc_for_daemon {
+                server.close();
+            }
             post(UiUpdate::Stopped(result.err()));
         })
         .map_err(|e| format!("cannot start the service thread: {e}"))?;

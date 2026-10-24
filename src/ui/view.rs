@@ -268,6 +268,7 @@ mod tests {
                 current: 0,
                 names: vec![Some("DESKTOP".into()), Some("LAPTOP".into())],
             }),
+            details: None,
         };
         Snapshot {
             links: vec![LinkStatus {

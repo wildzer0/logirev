@@ -15,13 +15,16 @@
 //! | Module | Responsibility |
 //! |---|---|
 //! | [`app`] | starting the service (config, logs, single instance, Ctrl+C) |
+//! | `autostart` | "Start with Windows" (Windows only) |
 //! | [`brightness`] | screen brightness (DDC/CI, WMI, Linux backlight) |
 //! | [`daemon`] | the event loop: connections, profiles, button events, actions |
 //! | [`config`] | reading and validating `logirev.toml` |
 //! | [`foreground`] | which program is in front (per-application buttons) |
+//! | [`icon`] | the application icon, drawn in code |
 //! | [`hidpp`] | the HID++ protocol: wire format, transport, features, receivers |
 //! | [`input`] | synthetic keyboard/mouse input |
 //! | [`instance`] | single-instance lock |
+//! | [`ipc`] | local channel between the service and the settings window |
 //! | [`logging`] | size-capped log file |
 //! | [`pcap`] | size-capped Wireshark capture |
 //! | [`service`] | start-at-login integration |
@@ -29,13 +32,17 @@
 //! | [`ui`] | tray icon and device window (Windows) |
 
 pub mod app;
+#[cfg(windows)]
+pub mod autostart;
 pub mod brightness;
 pub mod config;
 pub mod daemon;
 pub mod foreground;
 pub mod hidpp;
+pub mod icon;
 pub mod input;
 pub mod instance;
+pub mod ipc;
 pub mod logging;
 pub mod pcap;
 pub mod service;

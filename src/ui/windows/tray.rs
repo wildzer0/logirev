@@ -173,27 +173,15 @@ pub fn show_menu(hwnd: HWND, entries: &[MenuEntry]) -> Option<usize> {
     }
 }
 
-/// Draws the application icon: a blue disc with a lighter "ball", sized for
-/// the notification area. Drawn in code so no resource compiler is needed.
+/// Builds an icon handle from [`crate::icon::draw_rgba`] at the size the
+/// notification area uses.
 fn make_icon(size: i32) -> HICON {
-    let s = size as f32;
-    let mut pixels = vec![0u8; (size * size * 4) as usize];
-    // Soft edge: 1 inside, 0 outside, linear across one pixel.
-    let cover = |dx: f32, dy: f32, r: f32| (r - (dx * dx + dy * dy).sqrt() + 0.5).clamp(0.0, 1.0);
-    for y in 0..size {
-        for x in 0..size {
-            let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
-            let disc = cover(fx - s / 2.0, fy - s / 2.0, s * 0.47);
-            let ball = cover(fx - s * 0.42, fy - s * 0.42, s * 0.25);
-            // Blue (#2F6FD6) blended towards light (#DCE8FF) inside the ball.
-            let mix = |a: f32, b: f32| (a + (b - a) * ball) as u8;
-            let i = ((y * size + x) * 4) as usize;
-            pixels[i] = mix(214.0, 255.0); // B
-            pixels[i + 1] = mix(111.0, 232.0); // G
-            pixels[i + 2] = mix(47.0, 220.0); // R
-            pixels[i + 3] = (disc * 255.0) as u8; // A
-        }
-    }
+    let rgba = crate::icon::draw_rgba(size as u32);
+    // Windows wants BGRA.
+    let pixels: Vec<u8> = rgba
+        .chunks_exact(4)
+        .flat_map(|p| [p[2], p[1], p[0], p[3]])
+        .collect();
 
     // SAFETY: standard 32-bit ARGB icon creation; the DIB's memory is filled
     // with exactly size*size*4 bytes; bitmaps are freed after the icon copies

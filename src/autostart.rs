@@ -13,7 +13,10 @@ use windows_sys::Win32::System::Registry::{
     RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_SZ,
 };
 
-use super::util::wide;
+/// UTF-16, NUL-terminated copy of `s`.
+fn wide(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(std::iter::once(0)).collect()
+}
 
 const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 const VALUE_NAME: &str = "logirev";

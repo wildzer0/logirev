@@ -7,14 +7,16 @@
 //! callback. Messages for the user ("settings not applied: ...") travel the
 //! same way as [`UiUpdate::Notice`].
 
+use serde::{Deserialize, Serialize};
+
 /// Everything the interface shows.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Snapshot {
     pub links: Vec<LinkStatus>,
 }
 
 /// One receiver (or one directly connected device).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LinkStatus {
     /// Identifies the receiver in commands sent back to the daemon.
     pub key: String,
@@ -26,7 +28,7 @@ pub struct LinkStatus {
 }
 
 /// One device, connected or only paired.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeviceStatus {
     /// Receiver slot 1–6, or `0xFF` for a direct connection.
     pub slot: u8,
@@ -43,10 +45,50 @@ pub struct DeviceStatus {
     pub remapped: usize,
     /// Easy-Switch computers, when the device has several.
     pub hosts: Option<HostsStatus>,
+    /// What the device can do (connected devices only), for the settings
+    /// window.
+    #[serde(default)]
+    pub details: Option<DeviceDetails>,
+}
+
+/// Capabilities of a connected device: which settings make sense for it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeviceDetails {
+    pub firmware: String,
+    /// Buttons the firmware lets software look at.
+    pub controls: Vec<ControlInfo>,
+    /// Accepted DPI values (empty = no adjustable DPI).
+    pub dpi_values: Vec<u16>,
+    pub pointer_speed: bool,
+    pub hires_wheel: bool,
+    pub smartshift: bool,
+    pub thumb_wheel: bool,
+    /// Accepted report rates in Hz (empty = not adjustable).
+    pub report_rates: Vec<u16>,
+    pub fn_keys: bool,
+    /// Keys that can be disabled (bit mask, see `DISABLE_KEY_NAMES`).
+    pub disable_keys: u8,
+    /// Number of manual backlight levels, if the keyboard is backlit.
+    pub backlight_levels: Option<u8>,
+    pub backlight_auto: bool,
+}
+
+/// One button of a device.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ControlInfo {
+    pub cid: u16,
+    /// How the button is written in the configuration (`back`, `"0x00C3"`).
+    pub key: String,
+    /// Human-readable name.
+    pub label: String,
+    /// Can be remapped.
+    pub remappable: bool,
+    /// Can follow mouse movement (gestures).
+    pub gestures: bool,
 }
 
 /// Easy-Switch channels of a device.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HostsStatus {
     pub count: u8,
     /// Channel in use, counted from 0.
@@ -91,7 +133,7 @@ impl Snapshot {
 }
 
 /// A message from the service to the interface.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UiUpdate {
     /// The state changed.
     Snapshot(Snapshot),
@@ -127,6 +169,7 @@ mod tests {
             profile: None,
             remapped: 0,
             hosts: None,
+            details: None,
         }
     }
 

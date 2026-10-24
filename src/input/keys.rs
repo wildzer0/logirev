@@ -4,7 +4,7 @@
 //! Each name maps to a Windows *virtual-key code* and a Linux *evdev* code so
 //! the same configuration works on both systems. Names are case-insensitive.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// One keyboard key.
 #[derive(Debug, PartialEq, Eq)]
@@ -200,7 +200,7 @@ pub fn char_to_key(c: char) -> Option<(&'static Key, bool)> {
 }
 
 /// A mouse button that an action can press.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MouseButton {
     Left,

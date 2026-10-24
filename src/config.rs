@@ -23,7 +23,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use log::LevelFilter;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::hidpp::features::{parse_control, DeviceKind, SmartShift, DISABLE_KEY_NAMES};
 use crate::input::keys::{parse_chord, Key, MouseButton};
@@ -46,35 +46,39 @@ const MIN_REPEAT_MS: u32 = 30;
 // File layout (what serde reads)
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Clone, Serialize)]
 #[serde(deny_unknown_fields)]
-struct RawConfig {
+pub struct RawConfig {
     #[serde(default)]
-    general: General,
+    pub general: General,
     #[serde(default)]
-    logging: Logging,
-    #[serde(default, rename = "profile")]
-    profiles: Vec<RawProfile>,
+    pub logging: Logging,
+    #[serde(default, rename = "profile", skip_serializing_if = "Vec::is_empty")]
+    pub profiles: Vec<RawProfile>,
     /// `[macros.<name>]` blocks, usable from any button.
-    #[serde(default)]
-    macros: BTreeMap<String, RawMacro>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub macros: BTreeMap<String, RawMacro>,
 }
 
 /// `[macros.<name>]`: a named list of steps.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone, Serialize)]
 #[serde(deny_unknown_fields)]
-struct RawMacro {
-    steps: Vec<RawStep>,
+pub struct RawMacro {
+    pub steps: Vec<RawStep>,
 }
 
 /// `[general]` section.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct General {
     /// Product id of the receiver/device to use (e.g. `"c548"`); empty = auto.
     pub product_id: Option<String>,
     /// Warn when a battery drops to this percentage (0 = never).
     pub battery_warning: u8,
+    /// Settings window language: `auto` (follow the system), `en`, `it`.
+    pub language: String,
+    /// Settings window theme: `system`, `light`, `dark`.
+    pub theme: String,
 }
 
 impl Default for General {
@@ -82,12 +86,14 @@ impl Default for General {
         Self {
             product_id: None,
             battery_warning: 15,
+            language: "auto".into(),
+            theme: "system".into(),
         }
     }
 }
 
 /// `[logging]` section.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Logging {
     /// `error`, `warn`, `info`, `debug` or `trace` (trace = every frame).
@@ -114,39 +120,50 @@ impl Default for Logging {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize, Clone, Serialize)]
 #[serde(deny_unknown_fields)]
-struct RawProfile {
-    name: String,
+pub struct RawProfile {
+    pub name: String,
     #[serde(default, rename = "match")]
-    matcher: Match,
-    pointer_speed: Option<f32>,
-    dpi: Option<u16>,
-    hires_wheel: Option<bool>,
-    invert_wheel: Option<bool>,
-    smartshift: Option<RawSmartShift>,
-    thumb_wheel_invert: Option<bool>,
-    report_rate: Option<u16>,
-    function_keys: Option<FunctionKeys>,
-    disable_keys: Option<Vec<String>>,
-    backlight: Option<RawBacklight>,
-    #[serde(default)]
-    buttons: BTreeMap<String, RawAction>,
-    #[serde(default, rename = "app")]
-    apps: Vec<RawApp>,
+    pub matcher: Match,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pointer_speed: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dpi: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hires_wheel: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub invert_wheel: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub smartshift: Option<RawSmartShift>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumb_wheel_invert: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub report_rate: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub function_keys: Option<FunctionKeys>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disable_keys: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backlight: Option<RawBacklight>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub buttons: BTreeMap<String, RawAction>,
+    #[serde(default, rename = "app", skip_serializing_if = "Vec::is_empty")]
+    pub apps: Vec<RawApp>,
 }
 
 /// `smartshift = { mode = "smart", threshold = 12 }`.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone, Serialize)]
 #[serde(deny_unknown_fields)]
-struct RawSmartShift {
-    mode: SmartShiftMode,
-    threshold: Option<u8>,
+pub struct RawSmartShift {
+    pub mode: SmartShiftMode,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub threshold: Option<u8>,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
-enum SmartShiftMode {
+pub enum SmartShiftMode {
     /// Ratchet that frees itself when scrolling fast.
     Smart,
     /// Always clicking.
@@ -156,15 +173,16 @@ enum SmartShiftMode {
 }
 
 /// `backlight = { mode = "manual", level = 3 }`.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone, Serialize)]
 #[serde(deny_unknown_fields)]
-struct RawBacklight {
-    mode: BacklightMode,
-    level: Option<u8>,
+pub struct RawBacklight {
+    pub mode: BacklightMode,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub level: Option<u8>,
 }
 
 /// Keyboard backlight mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BacklightMode {
     /// Always off.
@@ -178,9 +196,9 @@ pub enum BacklightMode {
 }
 
 /// What F1–F12 do without holding Fn.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
-enum FunctionKeys {
+pub enum FunctionKeys {
     /// F1, F2... (media functions need Fn).
     Standard,
     /// Media / special functions (F1–F12 need Fn).
@@ -188,18 +206,18 @@ enum FunctionKeys {
 }
 
 /// `[[profile.app]]`: button changes inside some programs.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize, Clone, Serialize)]
 #[serde(deny_unknown_fields)]
-struct RawApp {
+pub struct RawApp {
     #[serde(rename = "match")]
-    programs: Vec<String>,
-    #[serde(default)]
-    buttons: BTreeMap<String, RawAction>,
+    pub programs: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub buttons: BTreeMap<String, RawAction>,
 }
 
 /// `match` rules of a profile. Every rule that is present must fit; a
 /// profile without rules matches every device.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Match {
     /// Text that must appear in the device name (case-insensitive).
@@ -219,9 +237,9 @@ impl Match {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone, Serialize)]
 #[serde(tag = "action", rename_all = "kebab-case")]
-enum RawAction {
+pub enum RawAction {
     Keys {
         keys: String,
     },
@@ -283,7 +301,7 @@ fn one() -> u8 {
     1
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ScrollDirection {
     Up,
@@ -293,27 +311,33 @@ pub enum ScrollDirection {
 }
 
 /// `host = 2` or `host = "next"`.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone, Serialize)]
 #[serde(untagged)]
-enum RawHost {
+pub enum RawHost {
     Number(u8),
     Name(String),
 }
 
 /// One step of a `sequence`: exactly one of the fields.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize, Clone, Serialize)]
 #[serde(deny_unknown_fields)]
-struct RawStep {
-    keys: Option<String>,
-    press: Option<String>,
-    release: Option<String>,
-    text: Option<String>,
-    click: Option<MouseButton>,
-    delay: Option<u32>,
+pub struct RawStep {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keys: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub press: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub release: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub click: Option<MouseButton>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delay: Option<u32>,
 }
 
 /// Change requested by a `backlight` action.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BacklightChange {
     Up,
@@ -495,7 +519,11 @@ impl Config {
 
     /// Validates configuration text; `base_dir` resolves relative paths.
     pub fn parse(text: &str, base_dir: &Path) -> Result<Self, String> {
-        let raw: RawConfig = toml::from_str(text).map_err(|e| e.to_string())?;
+        Self::from_raw(RawConfig::parse(text)?, base_dir)
+    }
+
+    /// Validates an already parsed file.
+    pub fn from_raw(raw: RawConfig, base_dir: &Path) -> Result<Self, String> {
         level_filter(&raw.logging.level)?;
         if raw.general.battery_warning > 100 {
             return Err("battery_warning must be between 0 and 100".into());
@@ -544,6 +572,35 @@ impl Config {
                     .map_err(|_| format!("invalid product_id \"{s}\""))
             }
         }
+    }
+}
+
+impl RawConfig {
+    /// Parses configuration text without validating it.
+    pub fn parse(text: &str) -> Result<Self, String> {
+        toml::from_str(text).map_err(|e| e.to_string())
+    }
+
+    /// Reads a configuration file as written (for the settings window).
+    pub fn load(path: &Path) -> Result<Self, String> {
+        let text =
+            fs::read_to_string(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+        Self::parse(&text).map_err(|e| format!("{}: {e}", path.display()))
+    }
+
+    /// Checks the configuration, then writes it (atomically: a temporary
+    /// file renamed over the old one, so the service never reads half a
+    /// file). Comments of a hand-written file are not kept.
+    pub fn save(&self, path: &Path) -> Result<(), String> {
+        Config::from_raw(self.clone(), path.parent().unwrap_or(Path::new(".")))?;
+        let body = toml::to_string_pretty(self).map_err(|e| e.to_string())?;
+        let text = format!(
+            "# logirev configuration, written by the logirev settings window.\n\
+             # You can still edit it by hand; see docs/CONFIGURATION.md.\n\n{body}"
+        );
+        let tmp = path.with_extension("toml.tmp");
+        fs::write(&tmp, text).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
+        fs::rename(&tmp, path).map_err(|e| format!("cannot replace {}: {e}", path.display()))
     }
 }
 
@@ -1198,6 +1255,47 @@ mod tests {
         assert!(bad(
             "[[profile]]\nname = \"p\"\nbacklight = { mode = \"manual\" }"
         ));
+    }
+
+    #[test]
+    fn writes_what_it_reads() {
+        // Template, with its examples enabled, survives a write/read cycle.
+        let raw = RawConfig::parse(TEMPLATE).unwrap();
+        let text = toml::to_string_pretty(&raw).unwrap();
+        let again = RawConfig::parse(&text).unwrap_or_else(|e| panic!("{e}\n{text}"));
+        let (a, b) = (
+            Config::from_raw(raw, Path::new(".")).unwrap(),
+            Config::from_raw(again, Path::new(".")).unwrap(),
+        );
+        assert_eq!(a.profiles.len(), b.profiles.len());
+        for (pa, pb) in a.profiles.iter().zip(&b.profiles) {
+            assert_eq!(pa.buttons, pb.buttons);
+            assert_eq!(pa.dpi, pb.dpi);
+        }
+        // Rich actions too.
+        let rich = r#"
+            [macros.m]
+            steps = [ { keys = "Ctrl+C" }, { delay = 10 } ]
+            [[profile]]
+            name = "p"
+            smartshift = { mode = "smart", threshold = 5 }
+            [profile.buttons.gesture]
+            action = "gesture"
+            up = { action = "keys", keys = "Super+Tab" }
+            [profile.buttons]
+            back = { action = "macro", name = "m", repeat = 100 }
+            forward = { action = "change-host", host = "next" }
+            [[profile.app]]
+            match = ["code"]
+            buttons.back = { action = "default" }
+        "#;
+        let raw = RawConfig::parse(rich).unwrap();
+        let text = toml::to_string_pretty(&raw).unwrap();
+        let again = Config::parse(&text, Path::new(".")).unwrap_or_else(|e| panic!("{e}\n{text}"));
+        assert_eq!(
+            again.profiles[0].buttons,
+            Config::parse(rich, Path::new(".")).unwrap().profiles[0].buttons
+        );
     }
 
     #[test]

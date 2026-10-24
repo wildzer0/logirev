@@ -53,7 +53,9 @@ use crate::hidpp::receiver::{paired_devices, PairedDevice};
 use crate::hidpp::transport::{self, Incoming, Transport, Waker};
 use crate::input::{self, Injector, Key};
 use crate::pcap::PcapWriter;
-use crate::status::{DeviceStatus, HostsStatus, LinkStatus, Snapshot, UiHooks, UiUpdate};
+use crate::status::{
+    ControlInfo, DeviceDetails, DeviceStatus, HostsStatus, LinkStatus, Snapshot, UiHooks, UiUpdate,
+};
 
 /// HID++ 1.0 notification sent by a receiver when a device (dis)connects.
 const NOTIF_DEVICE_CONNECTION: u8 = 0x41;
@@ -483,6 +485,8 @@ struct Session {
     hosts: Option<HostsStatus>,
     /// A macro repeating while its button is held.
     repeat: Option<Repeat>,
+    /// Capabilities shown in the settings window.
+    details: DeviceDetails,
 }
 
 /// A macro that runs again every `interval` while `cid` is held.
@@ -555,6 +559,7 @@ impl Link {
                     .map(|p| p.name.clone()),
                 remapped: s.diverted.len(),
                 hosts: s.hosts.clone(),
+                details: Some(s.details.clone()),
             })
             .collect();
         for p in &self.paired {
@@ -570,6 +575,7 @@ impl Link {
                     dpi: None,
                     remapped: 0,
                     hosts: None,
+                    details: None,
                 });
             }
         }
@@ -1098,7 +1104,13 @@ impl Link {
             backlight: None,
             hosts: None,
             repeat: None,
+            details: DeviceDetails::default(),
         };
+
+        if features.has(id::REPROG_CONTROLS_V4) {
+            session.controls = dev.controls()?;
+        }
+        session.details = collect_details(&mut dev, &features, &session.controls);
 
         if features.has(id::CHANGE_HOST) {
             if let Ok((count, current)) = dev.hosts() {
@@ -1140,12 +1152,10 @@ impl Link {
             session.backlight = apply_backlight(&mut dev, profile, slot);
         }
         let wanted = profile.buttons_for(app);
-        if !wanted.is_empty() || !profile.apps.is_empty() {
-            if features.has(id::REPROG_CONTROLS_V4) {
-                session.controls = dev.controls()?;
-            } else if !wanted.is_empty() {
-                warn!("slot {slot}: device has no reprogrammable buttons, ignoring the buttons section");
-            }
+        if !wanted.is_empty() && !features.has(id::REPROG_CONTROLS_V4) {
+            warn!(
+                "slot {slot}: device has no reprogrammable buttons, ignoring the buttons section"
+            );
         }
         apply_buttons(
             &mut dev,
@@ -1501,6 +1511,66 @@ fn apply_settings(dev: &mut Device, features: &FeatureTable, profile: &Profile, 
                 .map(|()| mask & possible)
         });
         report(slot, "disabled keys", r.map(disabled_key_names));
+    }
+}
+
+/// What the settings window needs to know about a device.
+fn collect_details(
+    dev: &mut Device,
+    features: &FeatureTable,
+    controls: &[Control],
+) -> DeviceDetails {
+    let backlight = if features.has(id::BACKLIGHT2) {
+        dev.backlight().ok()
+    } else {
+        None
+    };
+    DeviceDetails {
+        firmware: dev.firmware().unwrap_or_default(),
+        controls: controls
+            .iter()
+            .map(|c| {
+                let (key, label) = match control_name(c.cid) {
+                    Some((alias, desc)) => (alias.to_owned(), desc.to_owned()),
+                    None => (format!("{:#06x}", c.cid), format!("Button {:#06x}", c.cid)),
+                };
+                ControlInfo {
+                    cid: c.cid,
+                    key,
+                    label,
+                    remappable: c.is_divertable(),
+                    gestures: c.supports_raw_xy(),
+                }
+            })
+            .collect(),
+        dpi_values: if features.has(id::ADJUSTABLE_DPI) {
+            dev.dpi_choices().map(|c| c.values()).unwrap_or_default()
+        } else {
+            Vec::new()
+        },
+        pointer_speed: features.has(id::POINTER_SPEED),
+        hires_wheel: features.has(id::HIRES_WHEEL),
+        smartshift: features.has(id::SMART_SHIFT) || features.has(id::SMART_SHIFT_ENHANCED),
+        thumb_wheel: features.has(id::THUMB_WHEEL),
+        report_rates: if features.has(id::REPORT_RATE) {
+            dev.report_rates().unwrap_or_default()
+        } else {
+            Vec::new()
+        },
+        fn_keys: [
+            id::FN_INVERSION,
+            id::FN_INVERSION_NEW,
+            id::FN_INVERSION_K375S,
+        ]
+        .iter()
+        .any(|f| features.has(*f)),
+        disable_keys: if features.has(id::DISABLE_KEYS) {
+            dev.disableable_keys().unwrap_or(0)
+        } else {
+            0
+        },
+        backlight_levels: backlight.map(|_| dev.backlight_levels().unwrap_or(1).max(1)),
+        backlight_auto: backlight.is_some_and(|b| b.supports_auto()),
     }
 }
 

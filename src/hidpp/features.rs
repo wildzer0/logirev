@@ -12,7 +12,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::frame::HidppError;
 use super::transport::Transport;
@@ -143,7 +143,7 @@ impl FeatureTable {
 }
 
 /// Device category reported by `DeviceNameType.getDeviceType`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DeviceKind {
     Keyboard,
@@ -731,6 +731,20 @@ impl DpiChoices {
                 step: step & 0x1FFF,
             },
             _ => Self::Values(values),
+        }
+    }
+
+    /// Every accepted value, smallest first.
+    pub fn values(&self) -> Vec<u16> {
+        match self {
+            Self::Values(v) => {
+                let mut v = v.clone();
+                v.sort_unstable();
+                v
+            }
+            Self::Range { min, max, step } => {
+                (*min..=*max).step_by(usize::from((*step).max(1))).collect()
+            }
         }
     }
 
