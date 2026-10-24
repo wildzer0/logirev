@@ -47,6 +47,7 @@ use crate::hidpp::receiver::{paired_devices, PairedDevice};
 use crate::hidpp::transport::{self, Incoming, Transport, Waker};
 use crate::input::{self, Injector};
 use crate::pcap::PcapWriter;
+use crate::status::{DeviceStatus, LinkStatus, Snapshot, UiHooks, UiUpdate};
 
 /// HID++ 1.0 notification sent by a receiver when a device (dis)connects.
 const NOTIF_DEVICE_CONNECTION: u8 = 0x41;
@@ -69,16 +70,23 @@ const SETUP_BACKOFF: &[Duration] = &[
 ];
 /// Period of the housekeeping tick (configuration changes, hot-plug).
 const HOUSEKEEPING: Duration = Duration::from_secs(2);
-/// How often to look for *additional* receivers while some are open.
+/// How often to look for *additional* receivers while some are open (only
+/// when no interface reports device arrivals).
 const RESCAN_WHILE_CONNECTED: Duration = Duration::from_secs(15);
+/// Delay between an OS "device arrived" message and the rescan: Windows
+/// announces each HID collection separately and they need a moment to be
+/// ready, so several announcements are served by one rescan.
+const RESCAN_DEBOUNCE: Duration = Duration::from_millis(500);
 
 /// Something the event loop must react to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Event {
     /// A reader thread queued a HID++ frame or a disconnection.
     Hid,
-    /// Look for receivers/devices now (e.g. the OS reported a new device).
+    /// Look for receivers/devices (e.g. the OS reported a new device).
     Rescan,
+    /// Re-read the configuration file now.
+    Reload,
     /// Stop: restore every device and return.
     Quit,
 }
@@ -87,13 +95,15 @@ pub enum Event {
 ///
 /// * `cfg` / `config_path` — the configuration and where it came from
 ///   (watched for changes);
-/// * `tx` / `rx` — the event channel; `tx` is cloned into the HID readers.
+/// * `tx` / `rx` — the event channel; `tx` is cloned into the HID readers;
+/// * `hooks` — the graphical interface, if any, to keep informed.
 pub fn run(
     cfg: Config,
     config_path: &Path,
     pcap: Option<Arc<Mutex<PcapWriter>>>,
     tx: Sender<Event>,
     rx: Receiver<Event>,
+    hooks: Option<UiHooks>,
 ) -> Result<(), String> {
     let injector = match input::create() {
         Ok(i) => Some(i),
@@ -116,9 +126,13 @@ pub fn run(
         failed: BTreeSet::new(),
         waiting_logged: false,
         last_rescan: now,
+        rescan_due: None,
         next_housekeeping: now + HOUSEKEEPING,
+        hooks,
+        dirty: true,
     };
     daemon.rescan();
+    daemon.publish();
     daemon.event_loop(&rx);
     daemon.shutdown();
     info!("stopped");
@@ -138,7 +152,12 @@ struct Daemon {
     failed: BTreeSet<String>,
     waiting_logged: bool,
     last_rescan: Instant,
+    /// A rescan requested by the OS, due at this time.
+    rescan_due: Option<Instant>,
     next_housekeeping: Instant,
+    hooks: Option<UiHooks>,
+    /// The interface must be sent a new snapshot.
+    dirty: bool,
 }
 
 /// What a [`Link`] needs from the daemon while handling events.
@@ -160,14 +179,22 @@ impl Daemon {
             for ev in first.into_iter().chain(rx.try_iter()) {
                 match ev {
                     Event::Quit => return,
-                    Event::Rescan => self.rescan(),
+                    Event::Rescan => {
+                        self.rescan_due
+                            .get_or_insert(Instant::now() + RESCAN_DEBOUNCE);
+                    }
+                    Event::Reload => self.reload_config(),
                     Event::Hid => {}
                 }
+            }
+            if self.rescan_due.is_some_and(|due| due <= Instant::now()) {
+                self.rescan();
             }
             self.pump();
             if Instant::now() >= self.next_housekeeping {
                 self.housekeeping();
             }
+            self.publish();
         }
     }
 
@@ -180,6 +207,7 @@ impl Daemon {
             .iter()
             .flat_map(|l| l.pending.values().map(|p| p.due))
             .chain(std::iter::once(self.next_housekeeping))
+            .chain(self.rescan_due)
             .min()
             .unwrap_or(self.next_housekeeping)
     }
@@ -199,6 +227,7 @@ impl Daemon {
                 let mut link = self.links.remove(i);
                 link.release_all(&mut ctx);
                 warn!("lost connection to {}: {reason}", link.t.name);
+                self.dirty = true;
             } else {
                 i += 1;
             }
@@ -212,12 +241,15 @@ impl Daemon {
             self.config_mtime = current;
             self.reload_config();
         }
+        // With an interface reporting device arrivals there is nothing to
+        // poll; otherwise look for receivers now and then.
+        let hotplug = self.hooks.as_ref().is_some_and(|h| h.hotplug_events);
         let interval = if self.links.is_empty() {
             HOUSEKEEPING
         } else {
             RESCAN_WHILE_CONNECTED
         };
-        if self.last_rescan.elapsed() >= interval {
+        if !hotplug && self.last_rescan.elapsed() >= interval {
             self.rescan();
         }
     }
@@ -228,6 +260,7 @@ impl Daemon {
             Ok(c) => c,
             Err(e) => {
                 error!("configuration NOT reloaded, keeping the previous one: {e}");
+                self.notify("Settings not applied", &e);
                 return;
             }
         };
@@ -242,12 +275,42 @@ impl Daemon {
             link.reset_all(&mut ctx);
         }
         self.cfg = new;
+        self.dirty = true;
         info!("configuration reloaded; re-applying profiles (log file and capture settings need a restart)");
+    }
+
+    /// Sends a snapshot to the interface if anything changed.
+    fn publish(&mut self) {
+        let changed = self.dirty || self.links.iter().any(|l| l.changed);
+        if !changed {
+            return;
+        }
+        self.dirty = false;
+        let mut links = Vec::with_capacity(self.links.len());
+        for link in &mut self.links {
+            link.changed = false;
+            links.push(link.status(&self.cfg));
+        }
+        if let Some(h) = &self.hooks {
+            (h.observer)(UiUpdate::Snapshot(Snapshot { links }));
+        }
+    }
+
+    /// Shows a message to the user (only when an interface is attached; the
+    /// message is always in the log too).
+    fn notify(&self, title: &str, text: &str) {
+        if let Some(h) = &self.hooks {
+            (h.observer)(UiUpdate::Notice {
+                title: title.into(),
+                text: text.into(),
+            });
+        }
     }
 
     /// Opens every receiver/device that is not open yet.
     fn rescan(&mut self) {
         self.last_rescan = Instant::now();
+        self.rescan_due = None;
         let _ = self.api.refresh_devices();
         let wanted = self.cfg.product_id().ok().flatten();
         let groups = transport::group_devices(&transport::enumerate(&self.api));
@@ -277,11 +340,13 @@ impl Daemon {
                     let mut link = Link::new(key, t);
                     link.start();
                     self.links.push(link);
+                    self.dirty = true;
                 }
                 Err(e) => {
                     let msg = format!("{e} (close Logi Options+ / Solaar, or check permissions)");
                     if self.failed.insert(key) {
                         error!("{msg}");
+                        self.notify("Cannot open a Logitech receiver", &msg);
                     } else {
                         debug!("{msg}");
                     }
@@ -319,6 +384,10 @@ fn mtime(path: &Path) -> Option<SystemTime> {
 /// State kept for one connected device.
 struct Session {
     name: String,
+    kind: DeviceKind,
+    battery: Option<String>,
+    /// Name of the applied profile, if one matched.
+    profile: Option<String>,
     features: FeatureTable,
     /// Index of the ReprogControls feature (diverted button events use it).
     reprog_index: Option<u8>,
@@ -351,6 +420,8 @@ struct Link {
     paired: Vec<PairedDevice>,
     /// Set when the reader threads report the device is gone.
     lost: Option<String>,
+    /// Something the interface shows changed.
+    changed: bool,
 }
 
 impl Link {
@@ -362,6 +433,46 @@ impl Link {
             pending: BTreeMap::new(),
             paired: Vec::new(),
             lost: None,
+            changed: true,
+        }
+    }
+
+    /// What the interface shows for this link.
+    fn status(&self, cfg: &Config) -> LinkStatus {
+        let mut devices: Vec<DeviceStatus> = self
+            .sessions
+            .iter()
+            .map(|(slot, s)| DeviceStatus {
+                slot: *slot,
+                name: s.name.clone(),
+                kind: s.kind.to_string(),
+                online: true,
+                battery: s.battery.clone(),
+                dpi: s.base_dpi,
+                profile: s.profile.clone(),
+                remapped: s.diverted.len(),
+            })
+            .collect();
+        for p in &self.paired {
+            if !self.sessions.contains_key(&p.slot) {
+                let name = p.name.clone().unwrap_or_else(|| "unnamed device".into());
+                devices.push(DeviceStatus {
+                    slot: p.slot,
+                    profile: cfg.profile_for(&name, p.kind).map(|pr| pr.name.clone()),
+                    name,
+                    kind: p.kind.to_string(),
+                    online: false,
+                    battery: None,
+                    dpi: None,
+                    remapped: 0,
+                });
+            }
+        }
+        devices.sort_by_key(|d| d.slot);
+        LinkStatus {
+            name: self.t.name.clone(),
+            is_receiver: self.t.is_receiver,
+            devices,
         }
     }
 
@@ -443,6 +554,7 @@ impl Link {
                 );
                 release_session(ctx, &s);
                 self.pending.remove(&slot);
+                self.changed = true;
             }
             return;
         }
@@ -574,6 +686,7 @@ impl Link {
                 Ok(session) => {
                     self.pending.remove(&slot);
                     self.sessions.insert(slot, session);
+                    self.changed = true;
                 }
                 Err(e) if attempt + 1 < SETUP_BACKOFF.len() => {
                     debug!("slot {slot}: not ready yet ({e}), retrying");
@@ -605,8 +718,9 @@ impl Link {
         let mut dev = Device::new(t, slot, &features);
         let name = dev.name().unwrap_or_else(|_| "unknown device".into());
         let kind = dev.kind().unwrap_or(DeviceKind::Other);
-        let battery = dev
-            .battery()
+        let battery_level = dev.battery().ok();
+        let battery = battery_level
+            .as_ref()
             .map(|b| format!(", battery {b}"))
             .unwrap_or_default();
 
@@ -614,6 +728,9 @@ impl Link {
             reprog_index: features.index_of(id::REPROG_CONTROLS_V4),
             status_index: features.index_of(id::WIRELESS_DEVICE_STATUS),
             name: name.clone(),
+            kind,
+            battery: battery_level,
+            profile: None,
             features: features.clone(),
             diverted: BTreeMap::new(),
             pressed: Vec::new(),
@@ -630,6 +747,7 @@ impl Link {
             "slot {slot}: \"{name}\" ({kind}) connected{battery}; applying profile \"{}\"",
             profile.name
         );
+        session.profile = Some(profile.name.clone());
         apply_settings(&mut dev, &features, profile, slot);
         if features.has(id::POINTER_SPEED) {
             session.base_speed = profile.pointer_speed.or_else(|| dev.pointer_speed().ok());

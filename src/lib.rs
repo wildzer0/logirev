@@ -23,6 +23,8 @@
 //! | [`logging`] | size-capped log file |
 //! | [`pcap`] | size-capped Wireshark capture |
 //! | [`service`] | start-at-login integration |
+//! | [`status`] | what the service reports to the user interface |
+//! | [`ui`] | tray icon and device window (Windows) |
 
 pub mod app;
 pub mod config;
@@ -33,3 +35,5 @@ pub mod instance;
 pub mod logging;
 pub mod pcap;
 pub mod service;
+pub mod status;
+pub mod ui;

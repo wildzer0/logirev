@@ -1,9 +1,11 @@
-//! Starting the service: shared by the `logirev` and `logirevctl` programs.
+//! Starting the service: shared by `logirev`, its tray interface and
+//! `logirevctl run`.
 //!
-//! [`run_service`] does, in order: create the configuration file if it is
-//! missing, read it, open the log file and the optional capture, make sure no
-//! other copy is running, then hand over to [`crate::daemon::run`] until the
-//! user presses Ctrl+C (or the session ends).
+//! [`prepare`] does, in order: create the configuration file if it is
+//! missing, read it, open the log file and the optional capture, and make
+//! sure no other copy is running. [`run_service`] then hands over to
+//! [`crate::daemon::run`] until the user presses Ctrl+C; the Windows tray
+//! interface calls [`prepare`] itself and runs the daemon on a thread.
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -13,8 +15,9 @@ use log::info;
 
 use crate::config::{self, Config};
 use crate::daemon::{self, Event};
+use crate::instance::{self, InstanceGuard};
+use crate::logging;
 use crate::pcap::PcapWriter;
-use crate::{instance, logging};
 
 /// Name of the configuration file looked up next to the executable.
 pub const CONFIG_FILE: &str = "logirev.toml";
@@ -30,6 +33,17 @@ pub struct ServiceOptions {
     pub pcap: Option<PathBuf>,
 }
 
+/// Everything the daemon needs, ready to go.
+pub struct Prepared {
+    pub cfg: Config,
+    pub config_path: PathBuf,
+    /// Resolved log file path, if logging to a file.
+    pub log_file: Option<PathBuf>,
+    pub pcap: Option<Arc<Mutex<PcapWriter>>>,
+    /// Held for the lifetime of the service (single instance).
+    pub instance: InstanceGuard,
+}
+
 /// `logirev.toml` in the same folder as the executable (portable layout).
 pub fn default_config_path() -> PathBuf {
     std::env::current_exe()
@@ -39,13 +53,18 @@ pub fn default_config_path() -> PathBuf {
         .join(CONFIG_FILE)
 }
 
-/// Runs the background service until Ctrl+C.
-pub fn run_service(opts: &ServiceOptions) -> Result<(), String> {
+/// Loads the configuration, opens logs and capture, takes the instance lock.
+///
+/// `console` — also print log lines on standard error (false for the tray
+/// program, which has no console).
+pub fn prepare(opts: &ServiceOptions, console: bool) -> Result<Prepared, String> {
     let config_path = opts.config.clone().unwrap_or_else(default_config_path);
     if !config_path.exists() {
         std::fs::write(&config_path, config::TEMPLATE)
             .map_err(|e| format!("cannot create {}: {e}", config_path.display()))?;
-        eprintln!("created default configuration {}", config_path.display());
+        if console {
+            eprintln!("created default configuration {}", config_path.display());
+        }
     }
     let cfg = Config::load(&config_path)?;
 
@@ -54,11 +73,11 @@ pub fn run_service(opts: &ServiceOptions) -> Result<(), String> {
     logging::init(
         level,
         log_file.as_deref().map(|p| (p, cfg.logging.max_size)),
-        true,
+        console,
     )
     .map_err(|e| format!("cannot open log file: {e}"))?;
 
-    let _guard = instance::acquire().map_err(|e| format!("{e}"))?;
+    let instance = instance::acquire().map_err(|e| format!("{e}"))?;
     info!(
         "logirev {} starting, configuration {}",
         env!("CARGO_PKG_VERSION"),
@@ -70,7 +89,18 @@ pub fn run_service(opts: &ServiceOptions) -> Result<(), String> {
         .clone()
         .or_else(|| cfg.logging.pcap.as_ref().map(|p| cfg.resolve(p)));
     let pcap = open_pcap(pcap_path.as_deref(), cfg.logging.pcap_max_size)?;
+    Ok(Prepared {
+        cfg,
+        config_path,
+        log_file,
+        pcap,
+        instance,
+    })
+}
 
+/// Runs the background service in the terminal until Ctrl+C.
+pub fn run_service(opts: &ServiceOptions) -> Result<(), String> {
+    let p = prepare(opts, true)?;
     let (tx, rx) = mpsc::channel();
     let quit = tx.clone();
     ctrlc::set_handler(move || {
@@ -78,7 +108,9 @@ pub fn run_service(opts: &ServiceOptions) -> Result<(), String> {
     })
     .map_err(|e| format!("cannot install Ctrl+C handler: {e}"))?;
     info!("running; press Ctrl+C to stop");
-    daemon::run(cfg, &config_path, pcap, tx, rx)
+    let result = daemon::run(p.cfg, &p.config_path, p.pcap, tx, rx, None);
+    drop(p.instance);
+    result
 }
 
 /// Opens the size-limited capture file, if one is requested.
