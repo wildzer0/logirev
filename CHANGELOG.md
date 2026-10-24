@@ -3,7 +3,7 @@
 All notable changes are listed here. Versions follow
 [Semantic Versioning](https://semver.org).
 
-## [1.0.0] — unreleased
+## [1.0.0] — 2026-10-24
 
 ### Added
 - **Settings window** (`logirev --settings`, opened by the tray icon, by
