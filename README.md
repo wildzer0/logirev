@@ -13,13 +13,16 @@ cable or Bluetooth. It was built and tested with an **MX Ergo S** trackball.
 - **Plug & play:** plug in the receiver or wake up the device and its
   settings are applied by themselves.
 - Remap buttons to **shortcuts**, **mouse clicks**, **scrolling**,
-  **programs**, **simple macros**, **gestures** (hold a button and move) or
-  **switching computer** (Easy-Switch).
+  **programs**, **macros** (also repeating while held), **gestures** (hold a
+  button and move), **screen brightness**, **keyboard backlight** or
+  **switching computer** (Easy-Switch) — one device or all of them together.
+- **Easy-Switch from the icon menu:** *Send MX Ergo S to ▸ Computer 2*.
 - **Different buttons in different programs** (Windows), e.g. the side
   buttons do *undo / redo* only in Photoshop.
 - A **slow mode** button for precise work, or a button that **cycles DPI**.
 - Set **DPI / speed**, the **scroll wheel**, **SmartShift**, the **thumb
-  wheel**; on keyboards the **Fn keys** and **disabling Caps Lock** & co.
+  wheel**; on keyboards the **backlight**, the **Fn keys** and **disabling
+  Caps Lock** & co.
 - An **icon next to the clock** (Windows) showing your devices and their
   battery, with a *Start with Windows* option, and a **warning when a
   battery is low**.
@@ -141,7 +144,9 @@ you will find:
    sudo udevadm control --reload && sudo udevadm trigger
    ```
 
-   Unplug and re-plug the receiver, then log out and back in.
+   To let the `brightness` action change a laptop screen, also run
+   `sudo usermod -aG video $USER`. Unplug and re-plug the receiver, then log
+   out and back in.
 3. Quit Solaar if it is running.
 4. Look at your devices: `./logirevctl scan`
 5. Create the settings file and start at every log-in:
@@ -250,7 +255,6 @@ problem, press Ctrl+C.
 
 Ideas for later versions:
 
-- keyboard backlight settings;
 - per-program buttons on Linux;
 - editing buttons from the devices window instead of the text file.
 

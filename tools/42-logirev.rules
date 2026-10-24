@@ -7,5 +7,9 @@
 # Let the logged-in user talk HID++ to Logitech receivers and devices.
 KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="046d", TAG+="uaccess"
 
+# Let members of the "video" group change the screen backlight (laptops),
+# used by the "brightness" action. Add yourself with: sudo usermod -aG video $USER
+ACTION=="add", SUBSYSTEM=="backlight", RUN+="/bin/chgrp video /sys/class/backlight/%k/brightness", RUN+="/bin/chmod g+w /sys/class/backlight/%k/brightness"
+
 # Let the logged-in user create the virtual keyboard used for remapped buttons.
 KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"

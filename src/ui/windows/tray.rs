@@ -12,8 +12,8 @@ use windows_sys::Win32::UI::Shell::{
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreateIconIndirect, CreatePopupMenu, DestroyIcon, DestroyMenu, GetCursorPos,
     GetSystemMetrics, PostMessageW, SetForegroundWindow, SetMenuDefaultItem, TrackPopupMenu, HICON,
-    ICONINFO, MF_CHECKED, MF_DISABLED, MF_SEPARATOR, MF_STRING, SM_CXSMICON, TPM_NONOTIFY,
-    TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_NULL,
+    ICONINFO, MF_CHECKED, MF_DISABLED, MF_POPUP, MF_SEPARATOR, MF_STRING, SM_CXSMICON,
+    TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_NULL,
 };
 
 use super::util::{copy_into, wide};
@@ -104,7 +104,8 @@ impl Drop for Tray {
 }
 
 /// Shows the menu at the mouse position and returns the command picked.
-pub fn show_menu(hwnd: HWND, entries: &[MenuEntry]) -> Option<Command> {
+/// Returns the raw id of the picked item (see [`crate::ui::view::decode`]).
+pub fn show_menu(hwnd: HWND, entries: &[MenuEntry]) -> Option<usize> {
     // SAFETY: standard popup-menu sequence; every string outlives its
     // AppendMenuW call (the menu copies it).
     unsafe {
@@ -135,6 +136,20 @@ pub fn show_menu(hwnd: HWND, entries: &[MenuEntry]) -> Option<Command> {
                     let flags = MF_STRING | if *checked { MF_CHECKED } else { 0 };
                     AppendMenuW(menu, flags, command.id(), t.as_ptr());
                 }
+                MenuEntry::Submenu { label, items } => {
+                    let sub = CreatePopupMenu();
+                    if sub.is_null() {
+                        continue;
+                    }
+                    for item in items {
+                        let t = wide(&item.label);
+                        let flags = MF_STRING | if item.checked { MF_CHECKED } else { 0 };
+                        AppendMenuW(sub, flags, item.id, t.as_ptr());
+                    }
+                    let t = wide(label);
+                    // The submenu is destroyed together with its parent.
+                    AppendMenuW(menu, MF_STRING | MF_POPUP, sub as usize, t.as_ptr());
+                }
             }
         }
         SetMenuDefaultItem(menu, Command::ShowDevices.id() as u32, 0);
@@ -154,7 +169,7 @@ pub fn show_menu(hwnd: HWND, entries: &[MenuEntry]) -> Option<Command> {
         );
         PostMessageW(hwnd, WM_NULL, 0, 0);
         DestroyMenu(menu);
-        Command::from_id(picked as usize)
+        (picked > 0).then_some(picked as usize)
     }
 }
 

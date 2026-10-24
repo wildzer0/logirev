@@ -15,6 +15,7 @@
 //! | Module | Responsibility |
 //! |---|---|
 //! | [`app`] | starting the service (config, logs, single instance, Ctrl+C) |
+//! | [`brightness`] | screen brightness (DDC/CI, WMI, Linux backlight) |
 //! | [`daemon`] | the event loop: connections, profiles, button events, actions |
 //! | [`config`] | reading and validating `logirev.toml` |
 //! | [`foreground`] | which program is in front (per-application buttons) |
@@ -28,6 +29,7 @@
 //! | [`ui`] | tray icon and device window (Windows) |
 
 pub mod app;
+pub mod brightness;
 pub mod config;
 pub mod daemon;
 pub mod foreground;

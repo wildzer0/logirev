@@ -45,6 +45,7 @@ Both are thin wrappers around the library in `src/lib.rs`.
 | `src/service.rs` | start at log-in (systemd user unit) |
 | `src/status.rs` | snapshots and notices the daemon sends to the interface |
 | `src/foreground.rs` | foreground-program watcher (WinEvent hook) for per-program buttons |
+| `src/brightness.rs` | screen brightness: DDC/CI (dxva2), WMI fallback, Linux backlight |
 | `src/ui/view.rs` | content of the tray menu and device window (portable, tested) |
 | `src/ui/windows/` | Win32 tray icon, menu, device window, autostart, device notifications |
 | `build.rs`, `res/logirev.manifest` | Windows manifest (Common Controls 6, per-monitor DPI) embedded at link time |

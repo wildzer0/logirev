@@ -309,6 +309,23 @@ fn scan_device(t: &mut Transport, slot: u8, cfg: Option<&Config>) {
             }),
         );
     }
+    if features.has(id::BACKLIGHT2) {
+        print_field("backlight", dev.backlight());
+        print_field("light levels", dev.backlight_levels());
+    }
+    if features.has(id::HOSTS_INFO) {
+        print_field(
+            "computer names",
+            dev.host_names().map(|names| {
+                names
+                    .iter()
+                    .enumerate()
+                    .map(|(i, n)| format!("{}: {}", i + 1, n.as_deref().unwrap_or("(empty)")))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            }),
+        );
+    }
     if features.has(id::CHANGE_HOST) {
         print_field(
             "computers",

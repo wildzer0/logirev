@@ -65,6 +65,8 @@ pcap_max_size = 10485760      # 10 MiB
 #      function_keys = "standard"   # keyboards: "standard" F1..F12, or "special" (media)
 #      disable_keys  = ["capslock", "insert"]   # keyboards: capslock, numlock,
 #                                               # scrolllock, insert, windows
+#      backlight     = { mode = "manual", level = 3 }  # backlit keyboards:
+#                                               # "off", "on", "auto", "manual"
 #
 #  Buttons: one line per button you want to change, in the [profile.buttons]
 #  part. Button names: left, right, middle, back, forward, tilt_left,
@@ -80,6 +82,12 @@ pcap_max_size = 10485760      # 10 MiB
 #      { action = "toggle-pointer-speed", speed = 0.4 }  slow mode (pointer speed)
 #      { action = "cycle-dpi", dpi = [400, 800, 1600] }  next DPI at each press
 #      { action = "change-host", host = "next" }       Easy-Switch: 1, 2, 3 or "next"
+#      { action = "change-host", host = 2, all = true }  every device to computer 2
+#      { action = "brightness", change = 10 }          screen brighter (-10 = darker)
+#      { action = "brightness", set = 50 }             screen at 50 %
+#      { action = "backlight", change = "up" }         keyboard light: up/down/toggle
+#      { action = "macro", name = "signature" }        a macro from [macros] below
+#      { action = "macro", name = "spam", repeat = 100 }  ...repeated while held
 #      { action = "sequence", steps = [ { keys = "Ctrl+A" }, { delay = 100 }, { text = "Hi" } ] }
 #                                                      several steps (simple macro)
 #      gestures (hold the button and move; buttons marked "gestures" by scan):
@@ -107,6 +115,15 @@ pcap_max_size = 10485760      # 10 MiB
 #  PageDown, Left, Right, Up, Down, PrintScreen, VolumeUp, VolumeDown,
 #  VolumeMute, MediaPlayPause, MediaNext, MediaPrevious, BrowserBack,
 #  BrowserForward, Calculator, ... (full list in docs/CONFIGURATION.md).
+
+# -----------------------------------------------------------------------------
+#  Macros: named lists of steps, used with { action = "macro", name = "..." }
+# -----------------------------------------------------------------------------
+#  Steps: { keys = "Ctrl+C" }  { press = "Shift" }  { release = "Shift" }
+#         { text = "Hello" }   { click = "left" }   { delay = 100 }  (ms)
+#  Example (remove the "#" to use it):
+# [macros.signature]
+# steps = [ { text = "Best regards," }, { keys = "Enter" }, { text = "Your Name" } ]
 
 # --- Logitech MX Ergo S (and MX Ergo) trackball ------------------------------
 # The MX Ergo S changes speed through its DPI (sensor resolution). Remove the

@@ -3,6 +3,22 @@
 All notable changes are listed here. Versions follow
 [Semantic Versioning](https://semver.org).
 
+## [0.4.0] — unreleased
+
+### Added
+- Keyboard backlight (feature 0x1982): `backlight` profile setting
+  (`off`, `on`, `auto`, `manual` + `level`) and `backlight` action
+  (`up`, `down`, `toggle`).
+- Screen brightness action `brightness` (`change` by a percentage or `set`):
+  external monitors via DDC/CI, laptop panels via Windows WMI, Linux
+  kernel backlight.
+- Easy-Switch: computer names (feature 0x1815) in `scan` and in the devices
+  window; tray submenu *Send <device> to ▸ Computer N*; `change-host` with
+  `all = true` sends every connected device at once.
+- Named macros in `[macros.<name>]`, used with `{ action = "macro" }`;
+  `press` / `release` steps to hold keys; `repeat = <ms>` repeats a macro or
+  sequence while the button is held.
+
 ## [0.3.0] — unreleased
 
 ### Added

@@ -51,7 +51,7 @@ use crate::app::{self, Prepared, ServiceOptions};
 use crate::daemon::{self, Event};
 use crate::instance::InstanceGuard;
 use crate::status::{Snapshot, UiHooks, UiUpdate};
-use crate::ui::view::{self, Command};
+use crate::ui::view::{self, Command, Picked};
 use devices::DevicesWindow;
 use tray::Tray;
 
@@ -361,12 +361,20 @@ fn drain_updates() {
 }
 
 fn show_menu(hwnd: HWND) {
-    let entries =
-        with_state(|s| view::menu(&s.snapshot, autostart::is_enabled(), s.log_file.is_some()));
-    let Some(entries) = entries else { return };
+    let built = with_state(|s| {
+        let entries = view::menu(&s.snapshot, autostart::is_enabled(), s.log_file.is_some());
+        (entries, s.snapshot.clone())
+    });
+    let Some((entries, snapshot)) = built else {
+        return;
+    };
     // The state is not borrowed while the menu is open (nested message loop).
-    if let Some(cmd) = tray::show_menu(hwnd, &entries) {
-        run_command(cmd);
+    match tray::show_menu(hwnd, &entries).and_then(|id| view::decode(&snapshot, id)) {
+        Some(Picked::Command(cmd)) => run_command(cmd),
+        Some(Picked::SendTo { link, slot, host }) => {
+            with_state(|s| s.tx.send(Event::ChangeHost { link, slot, host }));
+        }
+        None => {}
     }
 }
 

@@ -39,6 +39,50 @@ impl Command {
     }
 }
 
+/// First menu id used for "send to computer" items (below are commands).
+const HOST_ID_BASE: usize = 1000;
+
+/// What a picked menu id means.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Picked {
+    Command(Command),
+    /// Send the device in `slot` of link `link` to computer `host` (from 0).
+    SendTo {
+        link: String,
+        slot: u8,
+        host: u8,
+    },
+}
+
+/// One item of a submenu.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MenuItem {
+    pub id: usize,
+    pub label: String,
+    pub checked: bool,
+}
+
+fn host_id(link: usize, slot: u8, host: u8) -> usize {
+    HOST_ID_BASE + (link * 256 + usize::from(slot)) * 4 + usize::from(host)
+}
+
+/// Decodes a menu id against the snapshot the menu was built from.
+pub fn decode(snapshot: &Snapshot, id: usize) -> Option<Picked> {
+    if id < HOST_ID_BASE {
+        return Command::from_id(id).map(Picked::Command);
+    }
+    let n = id - HOST_ID_BASE;
+    let (host, rest) = ((n % 4) as u8, n / 4);
+    let (slot, link) = ((rest % 256) as u8, rest / 256);
+    let link = snapshot.links.get(link)?;
+    link.devices.iter().find(|d| d.slot == slot && d.online)?;
+    Some(Picked::SendTo {
+        link: link.key.clone(),
+        slot,
+        host,
+    })
+}
+
 /// One line of the tray menu.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MenuEntry {
@@ -55,6 +99,11 @@ pub enum MenuEntry {
         command: Command,
         label: &'static str,
         checked: bool,
+    },
+    /// A line opening a submenu.
+    Submenu {
+        label: String,
+        items: Vec<MenuItem>,
     },
 }
 
@@ -80,6 +129,32 @@ pub fn menu(snapshot: &Snapshot, autostart: bool, has_log: bool) -> Vec<MenuEntr
             });
         }
     }
+
+    // Easy-Switch: one submenu per connected device with several computers.
+    let mut send = Vec::new();
+    for (li, link) in snapshot.links.iter().enumerate() {
+        for d in link.devices.iter().filter(|d| d.online) {
+            let Some(h) = d.hosts.as_ref().filter(|h| h.count > 1) else {
+                continue;
+            };
+            let items = (0..h.count.min(4))
+                .map(|host| MenuItem {
+                    id: host_id(li, d.slot, host),
+                    label: h.label(host),
+                    checked: host == h.current,
+                })
+                .collect();
+            send.push(MenuEntry::Submenu {
+                label: format!("Send {} to", d.name),
+                items,
+            });
+        }
+    }
+    if !send.is_empty() {
+        out.push(MenuEntry::Separator);
+        out.extend(send);
+    }
+
     out.push(MenuEntry::Separator);
     let cmd = |command, label| MenuEntry::Command {
         command,
@@ -119,7 +194,7 @@ fn device_label(d: &DeviceStatus) -> String {
 }
 
 /// Column titles of the device window.
-pub const COLUMNS: [&str; 9] = [
+pub const COLUMNS: [&str; 10] = [
     "Receiver",
     "Slot",
     "Device",
@@ -129,16 +204,21 @@ pub const COLUMNS: [&str; 9] = [
     "DPI",
     "Profile",
     "Remapped buttons",
+    "Computer",
 ];
 
 /// Relative column widths (in characters, roughly).
-pub const COLUMN_WIDTHS: [i32; 9] = [24, 6, 20, 10, 14, 10, 7, 18, 10];
+pub const COLUMN_WIDTHS: [i32; 10] = [24, 6, 20, 10, 14, 10, 7, 18, 10, 22];
 
 /// Rows of the device window, one per device.
-pub fn rows(snapshot: &Snapshot) -> Vec<[String; 9]> {
+pub fn rows(snapshot: &Snapshot) -> Vec<[String; 10]> {
     let mut out = Vec::new();
     for link in &snapshot.links {
         for d in &link.devices {
+            let computer = match &d.hosts {
+                Some(h) if h.count > 1 => format!("{} of {}", h.label(h.current), h.count),
+                _ => String::new(),
+            };
             out.push([
                 link.name.clone(),
                 if d.slot == RECEIVER_INDEX {
@@ -161,6 +241,7 @@ pub fn rows(snapshot: &Snapshot) -> Vec<[String; 9]> {
                 } else {
                     String::new()
                 },
+                computer,
             ]);
         }
     }
@@ -170,7 +251,7 @@ pub fn rows(snapshot: &Snapshot) -> Vec<[String; 9]> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::status::LinkStatus;
+    use crate::status::{HostsStatus, LinkStatus};
 
     fn snapshot() -> Snapshot {
         let dev = |slot, name: &str, online, battery: Option<&str>| DeviceStatus {
@@ -182,9 +263,15 @@ mod tests {
             dpi: online.then_some(750),
             profile: Some("MX Ergo".into()),
             remapped: 5,
+            hosts: online.then(|| HostsStatus {
+                count: 2,
+                current: 0,
+                names: vec![Some("DESKTOP".into()), Some("LAPTOP".into())],
+            }),
         };
         Snapshot {
             links: vec![LinkStatus {
+                key: "bolt".into(),
                 name: "Bolt receiver (046d:c548)".into(),
                 is_receiver: true,
                 devices: vec![
@@ -225,11 +312,40 @@ mod tests {
     }
 
     #[test]
+    fn menu_offers_easy_switch_and_decodes_it() {
+        let snap = snapshot();
+        let m = menu(&snap, false, true);
+        let Some(MenuEntry::Submenu { label, items }) =
+            m.iter().find(|e| matches!(e, MenuEntry::Submenu { .. }))
+        else {
+            panic!("send-to submenu expected");
+        };
+        assert_eq!(label, "Send MX Ergo S to");
+        assert_eq!(items.len(), 2);
+        assert!(items[0].checked && !items[1].checked);
+        assert_eq!(items[1].label, "Computer 2 (LAPTOP)");
+        assert_eq!(
+            decode(&snap, items[1].id),
+            Some(Picked::SendTo {
+                link: "bolt".into(),
+                slot: 2,
+                host: 1
+            })
+        );
+        assert_eq!(
+            decode(&snap, Command::Quit.id()),
+            Some(Picked::Command(Command::Quit))
+        );
+        assert_eq!(decode(&Snapshot::default(), items[1].id), None);
+    }
+
+    #[test]
     fn rows_describe_devices() {
         let r = rows(&snapshot());
         assert_eq!(r.len(), 2);
         assert_eq!(r[1][2], "MX Ergo S");
         assert_eq!(r[1][4], "connected");
+        assert_eq!(r[1][9], "Computer 1 (DESKTOP) of 2");
         assert_eq!(r[0][8], "", "offline devices show no remapped count");
     }
 

@@ -40,16 +40,20 @@ use std::time::{Duration, Instant, SystemTime};
 use hidapi::HidApi;
 use log::{debug, error, info, warn};
 
-use crate::config::{self, Action, Config, Gesture, HostTarget, Profile, SlowMode, Step};
+use crate::config::{
+    self, Action, BacklightChange, BacklightMode, Config, Gesture, HostTarget, Macro, Profile,
+    SlowMode, Step,
+};
 use crate::hidpp::features::{
-    control_name, id, Battery, Control, Device, DeviceKind, FeatureTable, DISABLE_KEY_NAMES,
+    control_name, id, BacklightState, Battery, Control, Device, DeviceKind, FeatureTable,
+    DISABLE_KEY_NAMES,
 };
 use crate::hidpp::frame::{Frame, HidppError, RECEIVER_INDEX, REPORT_SHORT, SOFTWARE_ID};
 use crate::hidpp::receiver::{paired_devices, PairedDevice};
 use crate::hidpp::transport::{self, Incoming, Transport, Waker};
-use crate::input::{self, Injector};
+use crate::input::{self, Injector, Key};
 use crate::pcap::PcapWriter;
-use crate::status::{DeviceStatus, LinkStatus, Snapshot, UiHooks, UiUpdate};
+use crate::status::{DeviceStatus, HostsStatus, LinkStatus, Snapshot, UiHooks, UiUpdate};
 
 /// HID++ 1.0 notification sent by a receiver when a device (dis)connects.
 const NOTIF_DEVICE_CONNECTION: u8 = 0x41;
@@ -92,6 +96,9 @@ pub enum Event {
     /// A different program came to the foreground (file name, e.g.
     /// `chrome.exe`), for per-application buttons.
     Foreground(String),
+    /// Send one device to another computer (from the tray menu):
+    /// `link` = [`LinkStatus::key`], `host` counted from 0.
+    ChangeHost { link: String, slot: u8, host: u8 },
     /// Stop: restore every device and return.
     Quit,
 }
@@ -176,6 +183,9 @@ struct Ctx<'a> {
     app: Option<&'a str>,
     /// Messages for the user, shown after the pass `(title, text)`.
     notices: Vec<(String, String)>,
+    /// A button asked to send *every* device to another computer; done by
+    /// the daemon after the pass because it involves all links.
+    switch_all: Option<HostTarget>,
 }
 
 /// Builds the [`Ctx`] for links from a daemon. A macro rather than a method
@@ -187,6 +197,7 @@ macro_rules! ctx {
             injector: $daemon.injector.as_deref_mut(),
             app: $daemon.app.as_deref(),
             notices: Vec::new(),
+            switch_all: None,
         }
     };
 }
@@ -210,6 +221,11 @@ impl Daemon {
                     }
                     Event::Reload => self.reload_config(),
                     Event::Foreground(program) => self.set_foreground(&program),
+                    Event::ChangeHost { link, slot, host } => {
+                        if let Some(l) = self.links.iter_mut().find(|l| l.key == link) {
+                            l.change_host(slot, HostTarget::Index(host));
+                        }
+                    }
                     Event::Hid => {}
                 }
             }
@@ -231,7 +247,14 @@ impl Daemon {
         }
         self.links
             .iter()
-            .flat_map(|l| l.pending.values().map(|p| p.due))
+            .flat_map(|l| {
+                let setups = l.pending.values().map(|p| p.due);
+                let repeats = l
+                    .sessions
+                    .values()
+                    .filter_map(|s| s.repeat.as_ref().map(|r| r.next));
+                setups.chain(repeats)
+            })
             .chain(std::iter::once(self.next_housekeeping))
             .chain(self.rescan_due)
             .min()
@@ -255,9 +278,18 @@ impl Daemon {
                 i += 1;
             }
         }
-        let notices = ctx.notices;
+        let (notices, switch_all) = (ctx.notices, ctx.switch_all);
         for (title, text) in notices {
             self.notify(&title, &text);
+        }
+        if let Some(target) = switch_all {
+            info!("sending every connected device to another computer");
+            for link in &mut self.links {
+                let slots: Vec<u8> = link.sessions.keys().copied().collect();
+                for slot in slots {
+                    link.change_host(slot, target);
+                }
+            }
         }
     }
 
@@ -445,6 +477,20 @@ struct Session {
     base_dpi: Option<u16>,
     /// The slow setting currently active, if slow mode is on.
     slow: Option<SlowMode>,
+    /// Keyboard backlight state and number of manual levels.
+    backlight: Option<(BacklightState, u8)>,
+    /// Easy-Switch channels.
+    hosts: Option<HostsStatus>,
+    /// A macro repeating while its button is held.
+    repeat: Option<Repeat>,
+}
+
+/// A macro that runs again every `interval` while `cid` is held.
+struct Repeat {
+    cid: u16,
+    mac: Macro,
+    interval: Duration,
+    next: Instant,
 }
 
 /// Movement accumulated while a gesture button is held.
@@ -508,6 +554,7 @@ impl Link {
                     .and_then(|i| cfg.profiles.get(i))
                     .map(|p| p.name.clone()),
                 remapped: s.diverted.len(),
+                hosts: s.hosts.clone(),
             })
             .collect();
         for p in &self.paired {
@@ -522,11 +569,13 @@ impl Link {
                     battery: None,
                     dpi: None,
                     remapped: 0,
+                    hosts: None,
                 });
             }
         }
         devices.sort_by_key(|d| d.slot);
         LinkStatus {
+            key: self.key.clone(),
             name: self.t.name.clone(),
             is_receiver: self.t.is_receiver,
             devices,
@@ -587,6 +636,7 @@ impl Link {
                 }
             }
             self.run_due_setups(ctx);
+            self.run_due_repeats(ctx);
             // Setups and actions may have set notifications aside.
             if !self.t.has_pending() {
                 return;
@@ -664,6 +714,11 @@ impl Link {
 
         for (cid, action) in released {
             debug!("slot {slot}: button {} released", describe(cid));
+            if let Some(s) = self.sessions.get_mut(&slot) {
+                if s.repeat.as_ref().is_some_and(|r| r.cid == cid) {
+                    s.repeat = None;
+                }
+            }
             if let Action::Gesture(g) = &action {
                 self.finish_gesture(ctx, slot, cid, g);
             } else {
@@ -682,6 +737,34 @@ impl Link {
                 }
             } else {
                 self.perform(ctx, slot, &action, true);
+                if let Action::Sequence(m) = &action {
+                    if let (Some(ms), Some(s)) = (m.repeat, self.sessions.get_mut(&slot)) {
+                        let interval = Duration::from_millis(u64::from(ms));
+                        s.repeat = Some(Repeat {
+                            cid,
+                            mac: m.clone(),
+                            interval,
+                            next: Instant::now() + interval,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    /// Runs again the macros whose button is still held.
+    fn run_due_repeats(&mut self, ctx: &mut Ctx) {
+        let now = Instant::now();
+        for s in self.sessions.values_mut() {
+            let Some(r) = s.repeat.as_mut().filter(|r| r.next <= now) else {
+                continue;
+            };
+            r.next = now + r.interval;
+            if let Some(inj) = ctx.injector.as_deref_mut() {
+                if let Err(e) = run_sequence(inj, &r.mac.steps) {
+                    warn!("repeating macro failed: {e}");
+                    s.repeat = None;
+                }
             }
         }
     }
@@ -780,10 +863,18 @@ impl Link {
                 Some(inj) => inj.scroll(*vertical, *horizontal),
                 None => Ok(()),
             },
-            Action::Sequence(steps) if down => match ctx.injector.as_deref_mut() {
-                Some(inj) => run_sequence(inj, steps),
+            Action::Sequence(m) if down => match ctx.injector.as_deref_mut() {
+                Some(inj) => run_sequence(inj, &m.steps),
                 None => Ok(()),
             },
+            Action::Brightness(change) if down => {
+                crate::brightness::adjust(*change);
+                Ok(())
+            }
+            Action::Backlight(change) if down => {
+                self.change_backlight(slot, *change);
+                Ok(())
+            }
             Action::Command { program, args } if down => spawn(program, args),
             Action::Toggle(slow) if down => {
                 self.toggle_slow_mode(slot, *slow);
@@ -793,8 +884,12 @@ impl Link {
                 self.cycle_dpi(slot, values);
                 Ok(())
             }
-            Action::ChangeHost(target) if down => {
-                self.change_host(slot, *target);
+            Action::ChangeHost { target, all } if down => {
+                if *all {
+                    ctx.switch_all = Some(*target);
+                } else {
+                    self.change_host(slot, *target);
+                }
                 Ok(())
             }
             _ => Ok(()),
@@ -841,6 +936,46 @@ impl Link {
                 info!("slot {slot}: DPI {next}");
             }
             Err(e) => warn!("slot {slot}: cannot set DPI {next}: {e}"),
+        }
+    }
+
+    /// Keyboard backlight: one level brighter / darker, or on / off.
+    fn change_backlight(&mut self, slot: u8, change: BacklightChange) {
+        let Some(s) = self.sessions.get_mut(&slot) else {
+            return;
+        };
+        let Some((mut state, levels)) = s.backlight else {
+            warn!("slot {slot}: \"{}\" has no adjustable backlight", s.name);
+            return;
+        };
+        let top = levels.saturating_sub(1);
+        match change {
+            BacklightChange::Toggle => state.enabled = !state.enabled,
+            BacklightChange::Up | BacklightChange::Down => {
+                if !state.supports_manual() {
+                    warn!("slot {slot}: this keyboard has no manual backlight levels");
+                    return;
+                }
+                let current = if state.mode() == BacklightState::MODE_MANUAL && state.enabled {
+                    state.level
+                } else {
+                    top / 2
+                };
+                state.level = if change == BacklightChange::Up {
+                    current.saturating_add(1).min(top)
+                } else {
+                    current.saturating_sub(1)
+                };
+                state.enabled = true;
+                state.set_mode(BacklightState::MODE_MANUAL);
+            }
+        }
+        match Device::new(&mut self.t, slot, &s.features).set_backlight(&state) {
+            Ok(()) => {
+                info!("slot {slot}: backlight {state}");
+                s.backlight = Some((state, levels));
+            }
+            Err(e) => warn!("slot {slot}: cannot change the backlight: {e}"),
         }
     }
 
@@ -960,7 +1095,25 @@ impl Link {
             base_speed: None,
             base_dpi: None,
             slow: None,
+            backlight: None,
+            hosts: None,
+            repeat: None,
         };
+
+        if features.has(id::CHANGE_HOST) {
+            if let Ok((count, current)) = dev.hosts() {
+                let names = if features.has(id::HOSTS_INFO) {
+                    dev.host_names().unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+                session.hosts = Some(HostsStatus {
+                    count,
+                    current,
+                    names,
+                });
+            }
+        }
 
         let Some(index) = cfg
             .profiles
@@ -982,6 +1135,9 @@ impl Link {
         }
         if features.has(id::ADJUSTABLE_DPI) {
             session.base_dpi = profile.dpi.or_else(|| dev.dpi().ok());
+        }
+        if features.has(id::BACKLIGHT2) {
+            session.backlight = apply_backlight(&mut dev, profile, slot);
         }
         let wanted = profile.buttons_for(app);
         if !wanted.is_empty() || !profile.apps.is_empty() {
@@ -1157,12 +1313,39 @@ fn apply_buttons(
 
 /// Runs the steps of a `sequence` action. Pauses block the service for
 /// their duration (limited to a few seconds by the configuration check).
+/// Keys held with `press` and never released are released at the end, even
+/// if a step fails, so no key stays stuck.
 fn run_sequence(inj: &mut dyn Injector, steps: &[Step]) -> std::io::Result<()> {
+    let mut held: Vec<&'static Key> = Vec::new();
+    let result = run_steps(inj, steps, &mut held);
+    for k in held.iter().rev() {
+        let _ = inj.key(k, false);
+    }
+    result
+}
+
+fn run_steps(
+    inj: &mut dyn Injector,
+    steps: &[Step],
+    held: &mut Vec<&'static Key>,
+) -> std::io::Result<()> {
     for step in steps {
         match step {
             Step::Keys(keys) => {
                 keys.iter().try_for_each(|k| inj.key(k, true))?;
                 keys.iter().rev().try_for_each(|k| inj.key(k, false))?;
+            }
+            Step::Press(keys) => {
+                for k in keys {
+                    inj.key(k, true)?;
+                    held.push(k);
+                }
+            }
+            Step::Release(keys) => {
+                for k in keys.iter().rev() {
+                    inj.key(k, false)?;
+                    held.retain(|h| h != k);
+                }
             }
             Step::Text(text) => inj.text(text)?,
             Step::Click(b) => {
@@ -1321,6 +1504,49 @@ fn apply_settings(dev: &mut Device, features: &FeatureTable, profile: &Profile, 
     }
 }
 
+/// Reads the keyboard backlight and applies the profile's `backlight`
+/// setting; returns the resulting state and the number of levels.
+fn apply_backlight(dev: &mut Device, profile: &Profile, slot: u8) -> Option<(BacklightState, u8)> {
+    let mut state = match dev.backlight() {
+        Ok(s) => s,
+        Err(e) => {
+            debug!("slot {slot}: cannot read the backlight: {e}");
+            return None;
+        }
+    };
+    let levels = dev.backlight_levels().unwrap_or(1).max(1);
+    let Some((mode, level)) = profile.backlight else {
+        return Some((state, levels));
+    };
+    match mode {
+        BacklightMode::Off => state.enabled = false,
+        BacklightMode::On => {
+            state.enabled = true;
+            state.set_mode(BacklightState::MODE_DEFAULT);
+        }
+        BacklightMode::Auto => {
+            if !state.supports_auto() {
+                warn!("slot {slot}: this keyboard has no light sensor, ignoring backlight = auto");
+                return Some((state, levels));
+            }
+            state.enabled = true;
+            state.set_mode(BacklightState::MODE_AUTO);
+        }
+        BacklightMode::Manual => {
+            state.enabled = true;
+            state.set_mode(BacklightState::MODE_MANUAL);
+            state.level = level.unwrap_or(0).min(levels - 1);
+        }
+    }
+    report(
+        slot,
+        "backlight",
+        dev.set_backlight(&state)
+            .map(|()| format!("set to {state}")),
+    );
+    Some((state, levels))
+}
+
 /// `0x09` → `"capslock, insert"`.
 fn disabled_key_names(mask: u8) -> String {
     let names: Vec<&str> = DISABLE_KEY_NAMES
@@ -1367,9 +1593,20 @@ fn summarize(action: &Action) -> String {
             vertical,
             horizontal,
         } => format!("scroll ({vertical}, {horizontal})"),
-        Action::ChangeHost(HostTarget::Next) => "next computer".into(),
-        Action::ChangeHost(HostTarget::Index(i)) => format!("computer {}", i + 1),
-        Action::Sequence(steps) => format!("sequence of {} steps", steps.len()),
+        Action::ChangeHost { target, all } => {
+            let who = if *all { "all devices" } else { "device" };
+            match target {
+                HostTarget::Next => format!("{who} to next computer"),
+                HostTarget::Index(i) => format!("{who} to computer {}", i + 1),
+            }
+        }
+        Action::Sequence(m) => match &m.name {
+            Some(n) => format!("macro \"{n}\""),
+            None => format!("sequence of {} steps", m.steps.len()),
+        },
+        Action::Brightness(crate::config::BrightnessChange::By(p)) => format!("brightness {p:+}%"),
+        Action::Brightness(crate::config::BrightnessChange::To(p)) => format!("brightness {p}%"),
+        Action::Backlight(c) => format!("backlight {c:?}").to_lowercase(),
         Action::Gesture(_) => "gesture".into(),
         Action::Disable => "nothing".into(),
     }
@@ -1396,8 +1633,11 @@ mod tests {
     #[test]
     fn summarizes_actions() {
         assert_eq!(
-            summarize(&Action::ChangeHost(HostTarget::Index(1))),
-            "computer 2"
+            summarize(&Action::ChangeHost {
+                target: HostTarget::Index(1),
+                all: true
+            }),
+            "all devices to computer 2"
         );
         assert_eq!(
             summarize(&Action::Scroll {

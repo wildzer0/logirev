@@ -39,6 +39,8 @@ pub mod id {
     pub const FN_INVERSION_NEW: u16 = 0x40A2;
     pub const FN_INVERSION_K375S: u16 = 0x40A3;
     pub const DISABLE_KEYS: u16 = 0x4521;
+    pub const HOSTS_INFO: u16 = 0x1815;
+    pub const BACKLIGHT2: u16 = 0x1982;
 }
 
 /// Human-readable name of a feature id, for `scan` output and logs.
@@ -394,6 +396,59 @@ impl<'a> Device<'a> {
         }
     }
 
+    // ---------------------------------------------------------------- 0x1815
+
+    /// Names of the computers the device is paired with (Easy-Switch
+    /// channels), `None` for empty channels. Names are what each computer
+    /// reported when pairing (usually its network name).
+    pub fn host_names(&mut self) -> Result<Vec<Option<String>>, HidppError> {
+        // getFeatureInfo -> [capabilities, reserved, host count, current host]
+        let count = self.call_min(id::HOSTS_INFO, 0, &[], 3)?[2];
+        let mut out = Vec::with_capacity(usize::from(count));
+        for host in 0..count {
+            // getHostInfo(host) -> [host, status, bus, pages, name length, max]
+            let info = self.call_min(id::HOSTS_INFO, 1, &[host], 5)?;
+            if info[1] == 0 {
+                out.push(None); // nothing paired on this channel
+                continue;
+            }
+            let len = usize::from(info[4]);
+            let mut name = Vec::with_capacity(len);
+            while name.len() < len {
+                // getHostFriendlyName(host, offset) -> [host, offset, up to 14 chars]
+                let piece = self.call_min(id::HOSTS_INFO, 3, &[host, name.len() as u8], 3)?;
+                let take = (len - name.len()).min(piece.len() - 2).min(14);
+                if take == 0 {
+                    break;
+                }
+                name.extend_from_slice(&piece[2..2 + take]);
+            }
+            let text = String::from_utf8_lossy(&name)
+                .trim_matches(char::from(0))
+                .trim()
+                .to_owned();
+            out.push(Some(text).filter(|t| !t.is_empty()));
+        }
+        Ok(out)
+    }
+
+    // ---------------------------------------------------------------- 0x1982
+
+    /// Keyboard backlight configuration.
+    pub fn backlight(&mut self) -> Result<BacklightState, HidppError> {
+        let p = self.call_min(id::BACKLIGHT2, 0, &[], 12)?;
+        Ok(BacklightState::parse(&p))
+    }
+
+    pub fn set_backlight(&mut self, state: &BacklightState) -> Result<(), HidppError> {
+        self.call(id::BACKLIGHT2, 1, &state.to_params()).map(drop)
+    }
+
+    /// Number of manual brightness levels (`level` goes from 0 to n-1).
+    pub fn backlight_levels(&mut self) -> Result<u8, HidppError> {
+        Ok(self.call_min(id::BACKLIGHT2, 2, &[], 1)?[0])
+    }
+
     // ------------------------------------------------------- 0x2110 / 0x2111
 
     /// SmartShift wheel mode, if the device has it.
@@ -566,6 +621,83 @@ impl fmt::Display for SmartShift {
     }
 }
 
+/// Keyboard backlight state (feature `0x1982`). Unlike most HID++ data the
+/// 16-bit fields of this feature are little-endian.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BacklightState {
+    pub enabled: bool,
+    /// Bits 3–4 hold the mode (see [`BacklightState::mode`]).
+    pub options: u8,
+    /// Supported modes: 0x08 automatic, 0x10 temporary, 0x20 manual.
+    pub supported: u8,
+    /// Manual brightness level.
+    pub level: u8,
+    /// Timeouts (hands out, hands in, on mains power), kept unchanged.
+    pub durations: [u16; 3],
+}
+
+impl BacklightState {
+    /// Mode values.
+    pub const MODE_DEFAULT: u8 = 0;
+    pub const MODE_AUTO: u8 = 1;
+    pub const MODE_MANUAL: u8 = 3;
+
+    /// `[enabled, options, supported, effects x2, level, durations x3 (u16 LE)]`.
+    fn parse(p: &[u8]) -> Self {
+        let le = |i: usize| u16::from_le_bytes([p[i], p[i + 1]]);
+        Self {
+            enabled: p[0] != 0,
+            options: p[1],
+            supported: p[2],
+            level: p[5],
+            durations: [le(6), le(8), le(10)],
+        }
+    }
+
+    /// `[enabled, options, 0xFF, level, durations x3 (u16 LE)]`.
+    fn to_params(self) -> Vec<u8> {
+        let level = if self.mode() == Self::MODE_MANUAL {
+            self.level
+        } else {
+            0
+        };
+        let mut v = vec![u8::from(self.enabled), self.options, 0xFF, level];
+        for d in self.durations {
+            v.extend_from_slice(&d.to_le_bytes());
+        }
+        v
+    }
+
+    pub fn mode(&self) -> u8 {
+        (self.options >> 3) & 0x03
+    }
+
+    pub fn set_mode(&mut self, mode: u8) {
+        self.options = (self.options & 0x07) | ((mode & 0x03) << 3);
+    }
+
+    pub fn supports_auto(&self) -> bool {
+        self.supported & 0x08 != 0
+    }
+
+    pub fn supports_manual(&self) -> bool {
+        self.supported & 0x20 != 0
+    }
+}
+
+impl fmt::Display for BacklightState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if !self.enabled {
+            return f.write_str("off");
+        }
+        match self.mode() {
+            Self::MODE_AUTO => f.write_str("automatic"),
+            Self::MODE_MANUAL => write!(f, "manual, level {}", self.level),
+            _ => f.write_str("on"),
+        }
+    }
+}
+
 /// Keys feature `0x4521` can disable: `(config name, bit)`.
 pub const DISABLE_KEY_NAMES: &[(&str, u8)] = &[
     ("capslock", 0x01),
@@ -722,6 +854,26 @@ mod tests {
             "100% (full)"
         );
         assert!(Battery::from_unified(&[1]).is_none());
+    }
+
+    #[test]
+    fn backlight_round_trip() {
+        let raw = [1, 0x18, 0x38, 0, 0, 2, 0x3C, 0, 0x2C, 0x01, 0x58, 0x02];
+        let mut b = BacklightState::parse(&raw);
+        assert_eq!(
+            (b.enabled, b.mode(), b.level),
+            (true, BacklightState::MODE_MANUAL, 2)
+        );
+        assert_eq!(b.durations, [60, 300, 600]);
+        assert!(b.supports_auto() && b.supports_manual());
+        assert_eq!(b.to_string(), "manual, level 2");
+        assert_eq!(
+            b.to_params(),
+            vec![1, 0x18, 0xFF, 2, 0x3C, 0, 0x2C, 0x01, 0x58, 0x02]
+        );
+        b.set_mode(BacklightState::MODE_AUTO);
+        assert_eq!(b.to_params()[3], 0, "level only sent in manual mode");
+        assert_eq!(b.to_string(), "automatic");
     }
 
     #[test]

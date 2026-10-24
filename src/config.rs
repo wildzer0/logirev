@@ -39,6 +39,8 @@ const MAX_STEP_DELAY_MS: u32 = 2000;
 const MAX_SEQUENCE_DELAY_MS: u32 = 5000;
 /// Default movement (in device counts) needed to recognise a gesture.
 const DEFAULT_GESTURE_THRESHOLD: u16 = 50;
+/// Shortest interval between repetitions of a held macro, in ms.
+const MIN_REPEAT_MS: u32 = 30;
 
 // ---------------------------------------------------------------------------
 // File layout (what serde reads)
@@ -53,6 +55,16 @@ struct RawConfig {
     logging: Logging,
     #[serde(default, rename = "profile")]
     profiles: Vec<RawProfile>,
+    /// `[macros.<name>]` blocks, usable from any button.
+    #[serde(default)]
+    macros: BTreeMap<String, RawMacro>,
+}
+
+/// `[macros.<name>]`: a named list of steps.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawMacro {
+    steps: Vec<RawStep>,
 }
 
 /// `[general]` section.
@@ -117,6 +129,7 @@ struct RawProfile {
     report_rate: Option<u16>,
     function_keys: Option<FunctionKeys>,
     disable_keys: Option<Vec<String>>,
+    backlight: Option<RawBacklight>,
     #[serde(default)]
     buttons: BTreeMap<String, RawAction>,
     #[serde(default, rename = "app")]
@@ -140,6 +153,28 @@ enum SmartShiftMode {
     Ratchet,
     /// Always free-spinning.
     Free,
+}
+
+/// `backlight = { mode = "manual", level = 3 }`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawBacklight {
+    mode: BacklightMode,
+    level: Option<u8>,
+}
+
+/// Keyboard backlight mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BacklightMode {
+    /// Always off.
+    Off,
+    /// On, managed by the keyboard's default behaviour.
+    On,
+    /// Brightness follows the room light (keyboards with a light sensor).
+    Auto,
+    /// Fixed brightness `level`.
+    Manual,
 }
 
 /// What F1–F12 do without holding Fn.
@@ -214,9 +249,23 @@ enum RawAction {
     },
     ChangeHost {
         host: RawHost,
+        #[serde(default)]
+        all: bool,
     },
     Sequence {
         steps: Vec<RawStep>,
+        repeat: Option<u32>,
+    },
+    Macro {
+        name: String,
+        repeat: Option<u32>,
+    },
+    Brightness {
+        change: Option<i8>,
+        set: Option<u8>,
+    },
+    Backlight {
+        change: BacklightChange,
     },
     Gesture {
         up: Option<Box<RawAction>>,
@@ -256,9 +305,20 @@ enum RawHost {
 #[serde(deny_unknown_fields)]
 struct RawStep {
     keys: Option<String>,
+    press: Option<String>,
+    release: Option<String>,
     text: Option<String>,
     click: Option<MouseButton>,
     delay: Option<u32>,
+}
+
+/// Change requested by a `backlight` action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BacklightChange {
+    Up,
+    Down,
+    Toggle,
 }
 
 // ---------------------------------------------------------------------------
@@ -273,6 +333,8 @@ pub struct Config {
     pub general: General,
     pub logging: Logging,
     pub profiles: Vec<Profile>,
+    /// Validated `[macros]`, by name.
+    pub macros: BTreeMap<String, Vec<Step>>,
 }
 
 /// One validated `[[profile]]`.
@@ -293,6 +355,8 @@ pub struct Profile {
     pub fn_keys_special: Option<bool>,
     /// Bit mask of keys to disable (feature 0x4521).
     pub disable_keys: Option<u8>,
+    /// Keyboard backlight mode and level (feature 0x1982).
+    pub backlight: Option<(BacklightMode, Option<u8>)>,
     /// Control id → what to do when that button is used.
     pub buttons: BTreeMap<u16, Action>,
     /// Per-program changes, first match wins.
@@ -323,10 +387,14 @@ pub enum Action {
     CycleDpi(Vec<u16>),
     /// Scroll by whole wheel notches (positive = up / right).
     Scroll { vertical: i32, horizontal: i32 },
-    /// Easy-Switch to another computer.
-    ChangeHost(HostTarget),
-    /// Several steps in a row (simple macro).
-    Sequence(Vec<Step>),
+    /// Easy-Switch to another computer; `all` = every connected device.
+    ChangeHost { target: HostTarget, all: bool },
+    /// Several steps in a row (macro).
+    Sequence(Macro),
+    /// Change the screen brightness.
+    Brightness(BrightnessChange),
+    /// Change the keyboard backlight.
+    Backlight(BacklightChange),
     /// Hold the button and move the pointer: one action per direction.
     Gesture(Box<Gesture>),
     /// Swallow the button: it does nothing at all.
@@ -350,13 +418,34 @@ pub enum HostTarget {
     Index(u8),
 }
 
+/// A sequence of steps, run when the button is pressed.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Macro {
+    /// Name, when it comes from `[macros]` (for the log).
+    pub name: Option<String>,
+    pub steps: Vec<Step>,
+    /// Run again every this many ms while the button is held.
+    pub repeat: Option<u32>,
+}
+
 /// One step of a sequence.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Step {
+    /// Press and release a shortcut.
     Keys(Vec<&'static Key>),
+    /// Press keys and keep them down (released by `Release` or at the end).
+    Press(Vec<&'static Key>),
+    Release(Vec<&'static Key>),
     Text(String),
     Click(MouseButton),
     Delay(u32),
+}
+
+/// Screen brightness change, in percent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrightnessChange {
+    By(i8),
+    To(u8),
 }
 
 /// A gesture button: what happens for each movement direction, and for a
@@ -411,16 +500,22 @@ impl Config {
         if raw.general.battery_warning > 100 {
             return Err("battery_warning must be between 0 and 100".into());
         }
+        let mut macros = BTreeMap::new();
+        for (name, m) in raw.macros {
+            let steps = validate_steps(m.steps).map_err(|e| format!("macro \"{name}\": {e}"))?;
+            macros.insert(name, steps);
+        }
         let profiles = raw
             .profiles
             .into_iter()
-            .map(Profile::validate)
+            .map(|p| Profile::validate(p, &macros))
             .collect::<Result<_, _>>()?;
         Ok(Self {
             base_dir: base_dir.to_path_buf(),
             general: raw.general,
             logging: raw.logging,
             profiles,
+            macros,
         })
     }
 
@@ -478,7 +573,7 @@ impl Profile {
         self.apps.iter().any(|a| a.programs.contains(&key))
     }
 
-    fn validate(raw: RawProfile) -> Result<Self, String> {
+    fn validate(raw: RawProfile, macros: &BTreeMap<String, Vec<Step>>) -> Result<Self, String> {
         let name = raw.name.clone();
         let ctx = |msg: String| format!("profile \"{name}\": {msg}");
 
@@ -486,8 +581,8 @@ impl Profile {
         for (key, action) in raw.buttons {
             let cid =
                 parse_control(&key).ok_or_else(|| ctx(format!("unknown button \"{key}\"")))?;
-            if let Some(a) =
-                validate_action(action, false).map_err(|e| ctx(format!("button \"{key}\": {e}")))?
+            if let Some(a) = validate_action(action, false, macros)
+                .map_err(|e| ctx(format!("button \"{key}\": {e}")))?
             {
                 buttons.insert(cid, a);
             }
@@ -504,7 +599,7 @@ impl Profile {
             for (key, action) in app.buttons {
                 let cid =
                     parse_control(&key).ok_or_else(|| ctx(format!("unknown button \"{key}\"")))?;
-                let a = validate_action(action, false)
+                let a = validate_action(action, false, macros)
                     .map_err(|e| ctx(format!("app {:?}, button \"{key}\": {e}", app.programs)))?;
                 map.insert(cid, a);
             }
@@ -560,7 +655,20 @@ impl Profile {
             }
         };
 
+        let backlight = match raw.backlight {
+            None => None,
+            Some(b) => {
+                if b.mode == BacklightMode::Manual && b.level.is_none() {
+                    return Err(ctx(
+                        "backlight mode \"manual\" needs a level, e.g. level = 3".into(),
+                    ));
+                }
+                Some((b.mode, b.level))
+            }
+        };
+
         Ok(Self {
+            backlight,
             pointer_speed: raw
                 .pointer_speed
                 .map(speed_to_raw)
@@ -591,7 +699,11 @@ pub fn program_key(name: &str) -> String {
 
 /// Turns one action from the file into its validated form. `Ok(None)` means
 /// "default behaviour". `nested` is true inside a gesture.
-fn validate_action(raw: RawAction, nested: bool) -> Result<Option<Action>, String> {
+fn validate_action(
+    raw: RawAction,
+    nested: bool,
+    macros: &BTreeMap<String, Vec<Step>>,
+) -> Result<Option<Action>, String> {
     Ok(Some(match raw {
         RawAction::Keys { keys } => Action::Keys(parse_chord(&keys)?),
         RawAction::Click { button } => Action::Click(button),
@@ -624,13 +736,47 @@ fn validate_action(raw: RawAction, nested: bool) -> Result<Option<Action>, Strin
                 horizontal,
             }
         }
-        RawAction::ChangeHost { host } => Action::ChangeHost(match host {
-            RawHost::Number(n @ 1..=3) => HostTarget::Index(n - 1),
-            RawHost::Name(s) if s.eq_ignore_ascii_case("next") => HostTarget::Next,
-            RawHost::Number(n) => return Err(format!("host {n} must be 1, 2, 3 or \"next\"")),
-            RawHost::Name(s) => return Err(format!("host \"{s}\" must be 1, 2, 3 or \"next\"")),
+        RawAction::ChangeHost { host, all } => Action::ChangeHost {
+            target: match host {
+                RawHost::Number(n @ 1..=3) => HostTarget::Index(n - 1),
+                RawHost::Name(s) if s.eq_ignore_ascii_case("next") => HostTarget::Next,
+                RawHost::Number(n) => return Err(format!("host {n} must be 1, 2, 3 or \"next\"")),
+                RawHost::Name(s) => {
+                    return Err(format!("host \"{s}\" must be 1, 2, 3 or \"next\""))
+                }
+            },
+            all,
+        },
+        RawAction::Sequence { steps, repeat } => Action::Sequence(Macro {
+            name: None,
+            steps: validate_steps(steps)?,
+            repeat: validate_repeat(repeat)?,
         }),
-        RawAction::Sequence { steps } => Action::Sequence(validate_steps(steps)?),
+        RawAction::Macro { name, repeat } => {
+            let steps = macros.get(&name).cloned().ok_or_else(|| {
+                let known: Vec<&str> = macros.keys().map(String::as_str).collect();
+                if known.is_empty() {
+                    format!("no macro named \"{name}\" (define it in a [macros.{name}] block)")
+                } else {
+                    format!("no macro named \"{name}\" (known: {})", known.join(", "))
+                }
+            })?;
+            Action::Sequence(Macro {
+                name: Some(name),
+                steps,
+                repeat: validate_repeat(repeat)?,
+            })
+        }
+        RawAction::Brightness { change, set } => Action::Brightness(match (change, set) {
+            (Some(c), None) if c != 0 => BrightnessChange::By(c),
+            (None, Some(v)) if v <= 100 => BrightnessChange::To(v),
+            _ => {
+                return Err(
+                    "brightness needs either change = 10 / -10 (percent) or set = 0..100".into(),
+                )
+            }
+        }),
+        RawAction::Backlight { change } => Action::Backlight(change),
         RawAction::Gesture {
             up,
             down,
@@ -644,7 +790,7 @@ fn validate_action(raw: RawAction, nested: bool) -> Result<Option<Action>, Strin
             }
             let sub = |a: Option<Box<RawAction>>| -> Result<Option<Action>, String> {
                 match a {
-                    Some(a) => validate_action(*a, true),
+                    Some(a) => validate_action(*a, true, macros),
                     None => Ok(None),
                 }
             };
@@ -670,11 +816,26 @@ fn validate_steps(steps: Vec<RawStep>) -> Result<Vec<Step>, String> {
     let mut out = Vec::with_capacity(steps.len());
     for (i, s) in steps.into_iter().enumerate() {
         let n = i + 1;
-        let step = match (s.keys, s.text, s.click, s.delay) {
-            (Some(k), None, None, None) => Step::Keys(parse_chord(&k)?),
-            (None, Some(t), None, None) => Step::Text(t),
-            (None, None, Some(b), None) => Step::Click(b),
-            (None, None, None, Some(ms)) => {
+        let given = [
+            s.keys.is_some(),
+            s.press.is_some(),
+            s.release.is_some(),
+            s.text.is_some(),
+            s.click.is_some(),
+            s.delay.is_some(),
+        ];
+        if given.iter().filter(|g| **g).count() != 1 {
+            return Err(format!(
+                "step {n} must have exactly one of keys, press, release, text, click or delay"
+            ));
+        }
+        let step = match (s.keys, s.press, s.release, s.text, s.click, s.delay) {
+            (Some(k), ..) => Step::Keys(parse_chord(&k)?),
+            (_, Some(k), ..) => Step::Press(parse_chord(&k)?),
+            (_, _, Some(k), ..) => Step::Release(parse_chord(&k)?),
+            (_, _, _, Some(t), ..) => Step::Text(t),
+            (_, _, _, _, Some(b), _) => Step::Click(b),
+            (_, _, _, _, _, Some(ms)) => {
                 if ms > MAX_STEP_DELAY_MS {
                     return Err(format!(
                         "step {n}: delay {ms} ms is longer than {MAX_STEP_DELAY_MS} ms"
@@ -683,11 +844,7 @@ fn validate_steps(steps: Vec<RawStep>) -> Result<Vec<Step>, String> {
                 total += ms;
                 Step::Delay(ms)
             }
-            _ => {
-                return Err(format!(
-                    "step {n} must have exactly one of keys, text, click or delay"
-                ))
-            }
+            _ => unreachable!("exactly one field is set"),
         };
         out.push(step);
     }
@@ -697,6 +854,16 @@ fn validate_steps(steps: Vec<RawStep>) -> Result<Vec<Step>, String> {
         ));
     }
     Ok(out)
+}
+
+/// Checks a `repeat` interval.
+fn validate_repeat(repeat: Option<u32>) -> Result<Option<u32>, String> {
+    match repeat {
+        Some(ms) if ms < MIN_REPEAT_MS => Err(format!(
+            "repeat = {ms} is too fast (at least {MIN_REPEAT_MS} ms)"
+        )),
+        other => Ok(other),
+    }
 }
 
 /// Converts a user-facing speed multiplier (1.0 = normal) to firmware units.
@@ -749,6 +916,8 @@ mod tests {
                     "dpi = ",
                     "function_keys",
                     "disable_keys",
+                    "[macros.",
+                    "steps = [",
                 ]
                 .iter()
                 .any(|p| body.starts_with(p));
@@ -765,6 +934,7 @@ mod tests {
         assert_eq!(ergo.dpi, Some(750));
         assert!(ergo.has_app_override("explorer.exe"));
         assert_eq!(cfg.profiles[1].fn_keys_special, Some(false));
+        assert!(cfg.macros.contains_key("signature"));
     }
 
     #[test]
@@ -881,10 +1051,22 @@ mod tests {
                 horizontal: -3
             }
         );
-        assert_eq!(p.buttons[&0x5D], Action::ChangeHost(HostTarget::Next));
-        assert_eq!(p.buttons[&0x52], Action::ChangeHost(HostTarget::Index(1)));
+        assert_eq!(
+            p.buttons[&0x5D],
+            Action::ChangeHost {
+                target: HostTarget::Next,
+                all: false
+            }
+        );
+        assert_eq!(
+            p.buttons[&0x52],
+            Action::ChangeHost {
+                target: HostTarget::Index(1),
+                all: false
+            }
+        );
         assert_eq!(p.buttons[&0xFD], Action::CycleDpi(vec![400, 800]));
-        assert!(matches!(&p.buttons[&0x53], Action::Sequence(s) if s.len() == 3));
+        assert!(matches!(&p.buttons[&0x53], Action::Sequence(m) if m.steps.len() == 3));
         let Action::Gesture(g) = &p.buttons[&0xC3] else {
             panic!("gesture expected")
         };
@@ -927,7 +1109,7 @@ mod tests {
         )
         .unwrap();
         let p = &cfg.profiles[0];
-        assert!(matches!(&p.buttons[&0x53], Action::Sequence(s) if s.len() == 4));
+        assert!(matches!(&p.buttons[&0x53], Action::Sequence(m) if m.steps.len() == 4));
         assert!(matches!(&p.buttons[&0xC3], Action::Gesture(_)));
         assert!(p.has_app_override("Photoshop.exe"));
     }
@@ -946,6 +1128,75 @@ mod tests {
         ));
         assert!(bad(
             r#"{ action = "gesture", up = { action = "gesture" } }"#
+        ));
+    }
+
+    #[test]
+    fn parses_macros_brightness_backlight() {
+        let cfg = parse(
+            r#"
+            [macros.sign]
+            steps = [ { text = "Best regards" }, { keys = "Enter" } ]
+
+            [macros.drag]
+            steps = [ { press = "Shift" }, { click = "left" }, { release = "Shift" } ]
+
+            [[profile]]
+            name = "p"
+            backlight = { mode = "manual", level = 4 }
+            [profile.buttons]
+            back = { action = "macro", name = "sign" }
+            forward = { action = "macro", name = "drag", repeat = 200 }
+            tilt_left = { action = "brightness", change = -10 }
+            tilt_right = { action = "brightness", set = 80 }
+            middle = { action = "backlight", change = "toggle" }
+            precision = { action = "change-host", host = 2, all = true }
+            "#,
+        )
+        .unwrap();
+        let p = &cfg.profiles[0];
+        assert_eq!(p.backlight, Some((BacklightMode::Manual, Some(4))));
+        let Action::Sequence(m) = &p.buttons[&0x53] else {
+            panic!("macro expected")
+        };
+        assert_eq!(
+            (m.name.as_deref(), m.steps.len(), m.repeat),
+            (Some("sign"), 2, None)
+        );
+        let Action::Sequence(m) = &p.buttons[&0x56] else {
+            panic!("macro expected")
+        };
+        assert_eq!(m.repeat, Some(200));
+        assert!(matches!(m.steps[0], Step::Press(_)));
+        assert_eq!(
+            p.buttons[&0x5B],
+            Action::Brightness(BrightnessChange::By(-10))
+        );
+        assert_eq!(
+            p.buttons[&0x5D],
+            Action::Brightness(BrightnessChange::To(80))
+        );
+        assert_eq!(p.buttons[&0x52], Action::Backlight(BacklightChange::Toggle));
+        assert_eq!(
+            p.buttons[&0xFD],
+            Action::ChangeHost {
+                target: HostTarget::Index(1),
+                all: true
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_bad_macros() {
+        let bad = |t: &str| parse(t).is_err();
+        assert!(bad(
+            "[[profile]]\nname = \"p\"\nbuttons.back = { action = \"macro\", name = \"nope\" }"
+        ));
+        assert!(bad("[macros.m]\nsteps = []"));
+        assert!(bad("[macros.m]\nsteps = [ { keys = \"A\" } ]\n[[profile]]\nname = \"p\"\nbuttons.back = { action = \"macro\", name = \"m\", repeat = 5 }"));
+        assert!(bad("[[profile]]\nname = \"p\"\nbuttons.back = { action = \"brightness\", change = 5, set = 5 }"));
+        assert!(bad(
+            "[[profile]]\nname = \"p\"\nbacklight = { mode = \"manual\" }"
         ));
     }
 

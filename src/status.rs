@@ -16,6 +16,8 @@ pub struct Snapshot {
 /// One receiver (or one directly connected device).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinkStatus {
+    /// Identifies the receiver in commands sent back to the daemon.
+    pub key: String,
     /// e.g. "Bolt receiver (046d:c548)".
     pub name: String,
     pub is_receiver: bool,
@@ -39,6 +41,28 @@ pub struct DeviceStatus {
     pub profile: Option<String>,
     /// Number of buttons remapped.
     pub remapped: usize,
+    /// Easy-Switch computers, when the device has several.
+    pub hosts: Option<HostsStatus>,
+}
+
+/// Easy-Switch channels of a device.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostsStatus {
+    pub count: u8,
+    /// Channel in use, counted from 0.
+    pub current: u8,
+    /// Computer names per channel, when the device reports them.
+    pub names: Vec<Option<String>>,
+}
+
+impl HostsStatus {
+    /// "Computer 2 (DESKTOP-ABC)".
+    pub fn label(&self, host: u8) -> String {
+        match self.names.get(usize::from(host)).cloned().flatten() {
+            Some(name) => format!("Computer {} ({name})", host + 1),
+            None => format!("Computer {}", host + 1),
+        }
+    }
 }
 
 impl Snapshot {
@@ -102,6 +126,7 @@ mod tests {
             dpi: None,
             profile: None,
             remapped: 0,
+            hosts: None,
         }
     }
 
@@ -110,6 +135,7 @@ mod tests {
         assert_eq!(Snapshot::default().tooltip(), "logirev — no receiver");
         let snap = Snapshot {
             links: vec![LinkStatus {
+                key: "k".into(),
                 name: "Bolt".into(),
                 is_receiver: true,
                 devices: vec![
@@ -121,6 +147,7 @@ mod tests {
         assert_eq!(snap.tooltip(), "logirev — MX Ergo S 30%");
         let long = Snapshot {
             links: vec![LinkStatus {
+                key: "k".into(),
                 name: "x".into(),
                 is_receiver: true,
                 devices: (0..20)
@@ -129,5 +156,17 @@ mod tests {
             }],
         };
         assert!(long.tooltip().chars().count() <= 127);
+    }
+
+    #[test]
+    fn labels_hosts() {
+        let h = HostsStatus {
+            count: 3,
+            current: 0,
+            names: vec![Some("PC".into()), None],
+        };
+        assert_eq!(h.label(0), "Computer 1 (PC)");
+        assert_eq!(h.label(1), "Computer 2");
+        assert_eq!(h.label(2), "Computer 3");
     }
 }

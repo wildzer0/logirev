@@ -100,6 +100,19 @@ Change buttons one at a time (save after each) and try them.
 | I2 | In the "Keyboard" profile set `disable_keys = ["capslock"]` | Caps Lock does nothing. |
 | I3 | Set `function_keys = "special"` then `"standard"` | F1–F12 switch between media and F-key behaviour. |
 
+## K. Brightness, backlight, Easy-Switch, macros (0.4)
+
+| # | Do | Expect |
+|---|---|---|
+| K1 | `tilt_left = { action = "brightness", change = -10 }`, `tilt_right = ... change = 10` | Each tilt makes the screen(s) darker / brighter. If nothing happens on an external monitor, enable DDC/CI in its menu. |
+| K2 | Menu → *Send MX Ergo S to ▸ Computer 2* (device paired to a second computer) | The trackball moves to the other computer; back with its Easy-Switch button. |
+| K3 | `middle = { action = "change-host", host = 2, all = true }` | Trackball **and** keyboard go to computer 2 together. |
+| K4 | `logirevctl scan` | *computer names* line lists the paired computers. |
+| K5 | Add `[macros.sig]` with `steps = [ { text = "Hi" }, { keys = "Enter" } ]` and `back = { action = "macro", name = "sig" }` | In Notepad Back types "Hi" + Enter. |
+| K6 | `forward = { action = "macro", name = "sig", repeat = 300 }`, hold Forward 2 s | "Hi" is typed repeatedly until you release. |
+| K7 | Macro with `{ press = "Shift" }, { click = "left" }` (no release) | Shift is released at the end (no stuck Shift). |
+| K8 | Backlit keyboard only: `backlight = { mode = "manual", level = 2 }` and a `backlight` action | Light level changes. |
+
 ## J. Command-line tools
 
 | # | Do | Expect |

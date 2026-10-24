@@ -102,6 +102,7 @@ All optional: leave one out and the device keeps its own value.
 | `report_rate` | `125` … `1000` (Hz) | how often the mouse reports; gaming mice only. `scan` lists the accepted values. |
 | `function_keys` | `"standard"` / `"special"` | keyboards: whether F1–F12 act as F-keys (`standard`) or as media keys (`special`) without holding Fn. |
 | `disable_keys` | e.g. `["capslock", "insert"]` | keyboards: keys that do nothing. Names: `capslock`, `numlock`, `scrolllock`, `insert`, `windows`. |
+| `backlight` | `{ mode = "off" }`, `{ mode = "on" }`, `{ mode = "auto" }`, `{ mode = "manual", level = 3 }` | backlit keyboards (MX Keys...): *auto* follows the room light, *manual* keeps a fixed level (`scan` shows how many levels there are, counted from 0). |
 
 ---
 
@@ -140,7 +141,10 @@ scan can be changed (left and right click never are).
 | `toggle-pointer-speed` | the same, for devices with *PointerSpeed* | `{ action = "toggle-pointer-speed", speed = 0.4 }` |
 | `cycle-dpi` | each press moves to the next DPI of the list | `{ action = "cycle-dpi", dpi = [400, 800, 1600] }` |
 | `scroll` | scrolls `up`, `down`, `left` or `right` by `amount` wheel notches | `{ action = "scroll", direction = "right", amount = 3 }` |
-| `change-host` | Easy-Switch: sends the device to computer `1`, `2`, `3` or the `"next"` one | `{ action = "change-host", host = "next" }` |
+| `change-host` | Easy-Switch: sends the device to computer `1`, `2`, `3` or the `"next"` one; with `all = true` **every** connected device goes (e.g. keyboard and mouse together) | `{ action = "change-host", host = 2, all = true }` |
+| `brightness` | screen brightness: `change` by a percentage, or `set` a percentage | `{ action = "brightness", change = -10 }` |
+| `backlight` | keyboard backlight: `up`, `down` or `toggle` | `{ action = "backlight", change = "up" }` |
+| `macro` | runs a macro defined in `[macros]` (see below); `repeat = 100` repeats it every 100 ms while held | `{ action = "macro", name = "signature" }` |
 | `sequence` | several steps in a row (a simple macro, see below) | `{ action = "sequence", steps = [ { keys = "Ctrl+C" } ] }` |
 | `gesture` | hold the button and move the pointer (see below) | `{ action = "gesture", up = { ... } }` |
 | `disable` | the button does nothing | `{ action = "disable" }` |
@@ -150,16 +154,37 @@ A program with arguments:
 `{ action = "command", command = "notepad.exe", args = ["C:\\notes.txt"] }`
 — in Windows paths write `\\` for every `\`.
 
-### Sequences (simple macros)
+### Macros and sequences
 
-A `sequence` runs its `steps` in order. Each step is exactly one of:
+A **sequence** is a list of `steps` run in order. Each step is exactly one
+of:
 
 | Step | Meaning |
 |---|---|
 | `{ keys = "Ctrl+C" }` | press and release a shortcut |
+| `{ press = "Shift" }` | press keys and keep them down... |
+| `{ release = "Shift" }` | ...until released (anything still down is released at the end) |
 | `{ text = "Hello" }` | type text |
 | `{ click = "left" }` | click a mouse button |
 | `{ delay = 200 }` | wait, in milliseconds (at most 2000 per step, 5000 in total) |
+
+A **macro** is a sequence with a name, written once in a `[macros.<name>]`
+block and used by as many buttons as you like:
+
+```toml
+[macros.signature]
+steps = [ { text = "Best regards," }, { keys = "Enter" }, { text = "Your Name" } ]
+
+[[profile]]
+name = "MX Ergo"
+[profile.buttons]
+back = { action = "macro", name = "signature" }
+```
+
+Add `repeat = <milliseconds>` to repeat a macro (or a sequence) for as long
+as the button is held, e.g. `{ action = "macro", name = "next", repeat = 150 }`.
+
+A sequence can also be written directly on a button:
 
 Short sequences fit on one line:
 
@@ -263,7 +288,21 @@ buttons.back = { action = "default" }   # the browser handles Back itself
 - Programs started "as administrator" are not recognised (Windows does not
   tell other programs about them); the profile's own buttons apply there.
 
-## 7. Wireshark capture
+## 7. Screen brightness
+
+The `brightness` action changes **all** screens:
+
+- external monitors through **DDC/CI**, the monitor's own control channel
+  (enable "DDC/CI" in the monitor's on-screen menu if nothing happens);
+- laptop screens through Windows' brightness control (or, on Linux, the
+  kernel backlight; see the README for the permission rule).
+
+```toml
+tilt_left  = { action = "brightness", change = -10 }   # darker
+tilt_right = { action = "brightness", change = 10 }    # brighter
+```
+
+## 8. Wireshark capture
 
 Set `pcap = "logirev.pcap"` (or start with `--pcap logirev.pcap`) to record
 every message exchanged with the devices. Open the file with
