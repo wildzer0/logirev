@@ -15,12 +15,13 @@ cable or Bluetooth. It was built and tested with an **MX Ergo S** trackball.
 - Remap buttons to **shortcuts**, **mouse clicks** or **programs**.
 - A **slow mode** button for precise work.
 - Set **DPI / speed** and the **scroll wheel**.
+- An **icon next to the clock** (Windows) showing your devices and their
+  battery, with a *Start with Windows* option.
 - A **log file** that never grows beyond 1 MB, and an optional recording of
   the traffic that you can open in **Wireshark**.
 
-> **Status:** early version (0.2). Reading devices is verified on an
-> MX Ergo S with a Bolt receiver on Windows. A tray icon and "start with
-> Windows" are coming in the next version — see [What's next](#whats-next).
+> **Status:** early version (0.3). Tested with an MX Ergo S on a Bolt
+> receiver on Windows.
 
 ---
 
@@ -90,17 +91,36 @@ you will find:
 
    A device that is asleep does not answer: move it and run the command again.
 
-3. **Start logirev:** double-click `logirev.exe`. A window opens and shows
-   what logirev is doing. **Keep this window open** (you can minimise it):
-   closing it stops logirev and your buttons go back to normal.
+3. **Start logirev:** double-click `logirev.exe`. No window opens: a small
+   blue round **icon appears next to the clock**. (If you do not see it,
+   click the `^` arrow next to the clock: Windows may have hidden it there.
+   You can drag it next to the clock to keep it always visible.)
 
    The first time, logirev creates **`logirev.toml`** — your settings — in
    the same folder, already prepared for the MX Ergo / MX Ergo S.
 
-4. **Start it automatically at log-in** (until the tray icon arrives):
-   press `Win+R`, type `shell:startup`, press Enter. In the folder that opens,
-   right-click → *New → Shortcut* → choose `logirev.exe`. Then right-click the
-   new shortcut → *Properties* → *Run:* **Minimised**.
+4. **Use the icon.** Hover it to see your connected devices and their
+   battery. **Left-click** opens the *devices* window (all paired devices,
+   connected or not, with battery, DPI and profile). **Right-click** opens
+   the menu:
+
+   | Menu item | What it does |
+   |---|---|
+   | *Slot 1, Slot 2...* | your paired devices; a tick ✓ means connected |
+   | *Show devices...* | opens the devices window |
+   | *Edit settings* | opens `logirev.toml` in your text editor |
+   | *Reload settings* | applies the settings now (they also apply by themselves when you save) |
+   | *Open log* | opens `logirev.log` |
+   | *Open logirev folder* | opens the folder in Explorer |
+   | *Start with Windows* | tick it to start logirev automatically when you log in |
+   | *Quit* | stops logirev; your buttons go back to normal |
+
+   When something needs your attention (for example a mistake in the
+   settings file) a notification appears.
+
+> Put the logirev folder somewhere permanent (e.g. `C:\Tools\logirev\`)
+> before ticking *Start with Windows*. If you move it later, just start it
+> once from the new place: the start-up entry follows it.
 
 ---
 
@@ -173,7 +193,13 @@ paired devices. logirev serves all of them, and several receivers at once.
 **Does it slow my computer down?** No. It sleeps until a device sends
 something; it uses about 3 MB of memory.
 
-**What happens when I close logirev?** It gives the buttons back to the
+**Does a window have to stay open?** No. On Windows logirev lives in the
+icon next to the clock; on Linux it runs as a background service.
+
+**Can it start by itself when I log in?** Yes: tick *Start with Windows* in
+the icon menu. On Linux, see step 5 of the Linux instructions.
+
+**What happens when I quit logirev?** It gives the buttons back to the
 device, so everything works as without logirev.
 
 **Can I use `logirevctl scan` while logirev is running?** Yes.
@@ -193,27 +219,27 @@ brings back the factory behaviour.
 |---|---|
 | `No Logitech HID++ interface found` | Is the receiver plugged in? On Linux, install the permission rules (step 2). |
 | `cannot open ...` | Quit Logi Options+ / Solaar. On Linux, check the permission rules. |
-| `logirev is already running` | logirev is already open (maybe minimised, or started at log-in). |
+| `logirev is already running` | logirev is already open: look for its icon next to the clock (or behind the `^` arrow). |
+| No icon appears | Click the `^` arrow next to the clock. If it is not there either, start `logirevctl run` in a terminal to see why. |
 | The device is not listed by `scan` | It is asleep: move it or press a button, then retry. |
 | `button ... cannot be remapped` | That button cannot be changed on this device; pick another one. |
-| A remapped button does nothing | Start with `logirev --log-level debug` and look for `button ... pressed` in the window. |
+| A remapped button does nothing | Quit logirev from its icon, then run `logirevctl run --log-level debug` in a terminal and look for `button ... pressed`. |
 | Shortcuts do not reach a program on Windows | Windows blocks simulated keys in programs started "as administrator", unless logirev is started as administrator too. |
 | Linux: `cannot open /dev/uinput` | Install the permission rules and log in again. |
 
 If you report a problem, attach `logirev.log` and, if possible, a capture:
-start logirev with `--pcap logirev.pcap`, reproduce the problem, stop it.
+quit logirev, run `logirevctl run --pcap logirev.pcap`, reproduce the
+problem, press Ctrl+C.
 
 ---
 
 ## What's next
 
-1. **Tray icon** near the clock with your devices, battery levels and a
-   *Start with Windows* option — no more window to keep open.
-2. **Battery warnings** and **per-application buttons** (e.g. tilt changes
+1. **Battery warnings** and **per-application buttons** (e.g. tilt changes
    tabs only in the browser).
-3. **More actions:** scrolling, switching computer (Easy-Switch), simple
+2. **More actions:** scrolling, switching computer (Easy-Switch), simple
    macros, gestures.
-4. **More devices:** SmartShift and thumb wheel (MX Master), keyboard
+3. **More devices:** SmartShift and thumb wheel (MX Master), keyboard
    backlight and Fn keys.
 
 ---

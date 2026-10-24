@@ -3,6 +3,28 @@
 All notable changes are listed here. Versions follow
 [Semantic Versioning](https://semver.org).
 
+## [0.3.0] — unreleased
+
+### Added
+- Windows: `logirev.exe` runs without a console window and shows an icon in
+  the notification area. Hovering shows the connected devices and their
+  battery; left-click opens a window listing every paired device (status,
+  battery, DPI, profile, remapped buttons); right-click opens a menu (show
+  devices, edit settings, reload, open log, open folder, start with
+  Windows, quit).
+- Windows: *Start with Windows* option (per-user `Run` registry entry, no
+  administrator rights; follows the program if it is moved).
+- Windows: receivers are detected the moment they are plugged in (device
+  notifications instead of periodic scanning).
+- Notifications for problems that need attention (settings file with
+  mistakes, receiver that cannot be opened).
+- "Reload settings" command.
+- Windows application manifest: modern controls and sharp rendering on
+  high-resolution screens.
+
+### Changed
+- Windows: to watch the log in a terminal, use `logirevctl run`.
+
 ## [0.2.0] — 2026-10-24
 
 ### Added

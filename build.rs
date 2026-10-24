@@ -13,6 +13,9 @@ fn main() {
         let dir = env::var("CARGO_MANIFEST_DIR").expect("set by cargo");
         let manifest = Path::new(&dir).join("res").join("logirev.manifest");
         println!("cargo:rustc-link-arg-bins=/MANIFEST:EMBED");
-        println!("cargo:rustc-link-arg-bins=/MANIFESTINPUT:{}", manifest.display());
+        println!(
+            "cargo:rustc-link-arg-bins=/MANIFESTINPUT:{}",
+            manifest.display()
+        );
     }
 }
