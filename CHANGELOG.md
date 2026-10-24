@@ -22,6 +22,20 @@ All notable changes are listed here. Versions follow
 - Windows application manifest: modern controls and sharp rendering on
   high-resolution screens.
 
+- Battery: the level shown is kept up to date from the device's own reports;
+  a notification warns once when it drops to `battery_warning` (default 15%)
+  and again only after charging.
+- Per-program buttons (Windows): `[[profile.app]]` blocks change buttons
+  while given programs are in the foreground (event-driven, no polling).
+- New actions: `scroll`, `cycle-dpi`, `change-host` (Easy-Switch),
+  `sequence` (simple macros: keys, text, clicks, pauses) and `gesture`
+  (hold a button and move: up / down / left / right / click).
+- New settings: `smartshift`, `thumb_wheel_invert`, `report_rate`,
+  `function_keys`, `disable_keys`.
+- `scan` shows SmartShift, thumb wheel, report rate, function keys,
+  disableable keys, Easy-Switch computers, and which buttons support
+  gestures.
+
 ### Changed
 - Windows: to watch the log in a terminal, use `logirevctl run`.
 

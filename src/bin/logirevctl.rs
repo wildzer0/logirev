@@ -19,7 +19,9 @@ use log::{error, LevelFilter};
 
 use logirev::app::{self, ServiceOptions};
 use logirev::config::{self, Config};
-use logirev::hidpp::features::{control_name, feature_name, id, Device, FeatureTable};
+use logirev::hidpp::features::{
+    control_name, feature_name, id, Device, FeatureTable, DISABLE_KEY_NAMES,
+};
 use logirev::hidpp::frame::RECEIVER_INDEX;
 use logirev::hidpp::receiver::{paired_devices, MAX_SLOTS};
 use logirev::hidpp::transport::{self, Transport};
@@ -261,6 +263,59 @@ fn scan_device(t: &mut Transport, slot: u8, cfg: Option<&Config>) {
                 .map(|f| format!("high-res {}, inverted {}", f & 0x02 != 0, f & 0x04 != 0)),
         );
     }
+    if features.has(id::SMART_SHIFT) || features.has(id::SMART_SHIFT_ENHANCED) {
+        print_field("smartshift", dev.smart_shift());
+    }
+    if features.has(id::THUMB_WHEEL) {
+        print_field(
+            "thumb wheel",
+            dev.thumb_wheel_inverted().map(|i| format!("inverted {i}")),
+        );
+    }
+    if features.has(id::REPORT_RATE) {
+        print_field(
+            "report rate",
+            dev.report_rate().map(|hz| format!("{hz} Hz")),
+        );
+        print_field(
+            "rate choices",
+            dev.report_rates().map(|r| format!("{r:?} Hz")),
+        );
+    }
+    if [
+        id::FN_INVERSION,
+        id::FN_INVERSION_NEW,
+        id::FN_INVERSION_K375S,
+    ]
+    .iter()
+    .any(|f| features.has(*f))
+    {
+        print_field(
+            "function keys",
+            dev.fn_keys_special()
+                .map(|s| if s { "special" } else { "standard" }),
+        );
+    }
+    if features.has(id::DISABLE_KEYS) {
+        print_field(
+            "disable keys",
+            dev.disableable_keys().map(|mask| {
+                let names: Vec<&str> = DISABLE_KEY_NAMES
+                    .iter()
+                    .filter(|(_, b)| mask & b != 0)
+                    .map(|(n, _)| *n)
+                    .collect();
+                format!("can disable {}", names.join(", "))
+            }),
+        );
+    }
+    if features.has(id::CHANGE_HOST) {
+        print_field(
+            "computers",
+            dev.hosts()
+                .map(|(n, cur)| format!("{n} (now on {})", cur + 1)),
+        );
+    }
     if let (Some(cfg), Ok(k)) = (cfg, dev.kind()) {
         let profile = cfg.profile_for(&name, k).map(|p| format!("\"{}\"", p.name));
         println!(
@@ -289,11 +344,14 @@ fn scan_device(t: &mut Transport, slot: u8, cfg: Option<&Config>) {
                     if c.is_virtual() {
                         tags.push("virtual");
                     }
+                    if c.supports_raw_xy() {
+                        tags.push("gestures");
+                    }
                     if c.is_mouse_button() {
                         tags.push("mouse button");
                     }
                     println!(
-                        "    {alias:<16} {:#06x}  {:<22} task {:#06x}  {desc}",
+                        "    {alias:<16} {:#06x}  {:<32} task {:#06x}  {desc}",
                         c.cid,
                         tags.join(", "),
                         c.task

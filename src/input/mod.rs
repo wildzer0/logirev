@@ -23,6 +23,10 @@ pub use keys::{Key, MouseButton};
 pub trait Injector {
     fn key(&mut self, key: &Key, down: bool) -> io::Result<()>;
     fn button(&mut self, button: MouseButton, down: bool) -> io::Result<()>;
+    /// Turns the wheel by whole notches (positive = up / right).
+    fn scroll(&mut self, vertical: i32, horizontal: i32) -> io::Result<()>;
+    /// Types text as if entered on the keyboard.
+    fn text(&mut self, text: &str) -> io::Result<()>;
 }
 
 /// Creates the injector for the current operating system.

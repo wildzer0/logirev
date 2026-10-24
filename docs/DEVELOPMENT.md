@@ -44,6 +44,7 @@ Both are thin wrappers around the library in `src/lib.rs`.
 | `src/instance.rs` | single-instance lock |
 | `src/service.rs` | start at log-in (systemd user unit) |
 | `src/status.rs` | snapshots and notices the daemon sends to the interface |
+| `src/foreground.rs` | foreground-program watcher (WinEvent hook) for per-program buttons |
 | `src/ui/view.rs` | content of the tray menu and device window (portable, tested) |
 | `src/ui/windows/` | Win32 tray icon, menu, device window, autostart, device notifications |
 | `build.rs`, `res/logirev.manifest` | Windows manifest (Common Controls 6, per-monitor DPI) embedded at link time |
@@ -57,7 +58,8 @@ Both are thin wrappers around the library in `src/lib.rs`.
 ```
  reader threads (1 per HID path) ──frame──▶ Transport queue ──wake──▶ ┐
  Ctrl+C handler (terminal) ────────────────────── Event::Quit ──────▶ ├─▶ daemon event loop
- UI thread: menu, WM_DEVICECHANGE ─── Event::Reload/Rescan/Quit ────▶ ┘     (own thread)
+ UI thread: menu, WM_DEVICECHANGE ─── Event::Reload/Rescan/Quit ────▶ ┤     (own thread)
+ foreground thread (WinEvent hook) ──────── Event::Foreground ──────▶ ┘
                                                                             │
  UI thread (Win32 message loop) ◀── WM_APP_UPDATE + queue ◀── UiUpdate ─────┘
 ```
@@ -77,6 +79,14 @@ held across nested message loops (menus, message boxes).
   device index and bytes 2–3 match, setting other frames aside for the loop.
 - The service uses software id `0x0A`, `logirevctl` uses `0x0B`, so both can
   talk to the same receiver at once.
+- Buttons are diverted according to `Profile::buttons_for(program)`; when the
+  foreground program changes, `Link::refresh_buttons` only diverts / gives
+  back the buttons whose mapping changed (`apply_buttons`).
+- Gesture buttons are diverted with *raw XY* reporting: while held, the
+  device sends movement (`ReprogControlsV4` function 1) instead of moving
+  the pointer; `Gesture::pick` chooses the action on release.
+- Battery reports (function 0 of `0x1004` / `0x1000`) update the session;
+  `Link::check_battery` warns once per discharge (hysteresis of 5 points).
 
 The protocol itself is described in plain language in
 [PROTOCOL.md](PROTOCOL.md).
@@ -96,6 +106,7 @@ their features are discovered at runtime. To support a new setting:
 
 ## Releasing
 
+0. Run the manual checks in [TESTING.md](TESTING.md) on real hardware.
 1. Update `version` in `Cargo.toml` and the `CHANGELOG.md` entry.
 2. Commit, then tag and push:
    ```bash

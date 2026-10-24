@@ -40,8 +40,10 @@ use std::time::{Duration, Instant, SystemTime};
 use hidapi::HidApi;
 use log::{debug, error, info, warn};
 
-use crate::config::{self, Action, Config, Profile, SlowMode};
-use crate::hidpp::features::{control_name, id, Device, DeviceKind, FeatureTable};
+use crate::config::{self, Action, Config, Gesture, HostTarget, Profile, SlowMode, Step};
+use crate::hidpp::features::{
+    control_name, id, Battery, Control, Device, DeviceKind, FeatureTable, DISABLE_KEY_NAMES,
+};
 use crate::hidpp::frame::{Frame, HidppError, RECEIVER_INDEX, REPORT_SHORT, SOFTWARE_ID};
 use crate::hidpp::receiver::{paired_devices, PairedDevice};
 use crate::hidpp::transport::{self, Incoming, Transport, Waker};
@@ -79,7 +81,7 @@ const RESCAN_WHILE_CONNECTED: Duration = Duration::from_secs(15);
 const RESCAN_DEBOUNCE: Duration = Duration::from_millis(500);
 
 /// Something the event loop must react to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
     /// A reader thread queued a HID++ frame or a disconnection.
     Hid,
@@ -87,6 +89,9 @@ pub enum Event {
     Rescan,
     /// Re-read the configuration file now.
     Reload,
+    /// A different program came to the foreground (file name, e.g.
+    /// `chrome.exe`), for per-application buttons.
+    Foreground(String),
     /// Stop: restore every device and return.
     Quit,
 }
@@ -130,6 +135,7 @@ pub fn run(
         next_housekeeping: now + HOUSEKEEPING,
         hooks,
         dirty: true,
+        app: None,
     };
     daemon.rescan();
     daemon.publish();
@@ -158,12 +164,31 @@ struct Daemon {
     hooks: Option<UiHooks>,
     /// The interface must be sent a new snapshot.
     dirty: bool,
+    /// Program in the foreground (normalised name), if known.
+    app: Option<String>,
 }
 
 /// What a [`Link`] needs from the daemon while handling events.
 struct Ctx<'a> {
     cfg: &'a Config,
     injector: Option<&'a mut (dyn Injector + 'static)>,
+    /// Program in the foreground, for per-application buttons.
+    app: Option<&'a str>,
+    /// Messages for the user, shown after the pass `(title, text)`.
+    notices: Vec<(String, String)>,
+}
+
+/// Builds the [`Ctx`] for links from a daemon. A macro rather than a method
+/// so that only the needed fields are borrowed, leaving `links` free.
+macro_rules! ctx {
+    ($daemon:expr) => {
+        Ctx {
+            cfg: &$daemon.cfg,
+            injector: $daemon.injector.as_deref_mut(),
+            app: $daemon.app.as_deref(),
+            notices: Vec::new(),
+        }
+    };
 }
 
 impl Daemon {
@@ -184,6 +209,7 @@ impl Daemon {
                             .get_or_insert(Instant::now() + RESCAN_DEBOUNCE);
                     }
                     Event::Reload => self.reload_config(),
+                    Event::Foreground(program) => self.set_foreground(&program),
                     Event::Hid => {}
                 }
             }
@@ -214,10 +240,7 @@ impl Daemon {
 
     /// Handles every queued frame and every due setup, on every link.
     fn pump(&mut self) {
-        let mut ctx = Ctx {
-            cfg: &self.cfg,
-            injector: self.injector.as_deref_mut(),
-        };
+        let mut ctx = ctx!(self);
         for link in &mut self.links {
             link.pump(&mut ctx);
         }
@@ -231,6 +254,24 @@ impl Daemon {
             } else {
                 i += 1;
             }
+        }
+        let notices = ctx.notices;
+        for (title, text) in notices {
+            self.notify(&title, &text);
+        }
+    }
+
+    /// Applies the buttons configured for the program now in front.
+    fn set_foreground(&mut self, program: &str) {
+        let key = config::program_key(program);
+        if self.app.as_deref() == Some(key.as_str()) {
+            return;
+        }
+        debug!("foreground program: {key}");
+        self.app = Some(key);
+        let mut ctx = ctx!(self);
+        for link in &mut self.links {
+            link.refresh_buttons(&mut ctx);
         }
     }
 
@@ -267,10 +308,7 @@ impl Daemon {
         if let Ok(level) = config::level_filter(&new.logging.level) {
             log::set_max_level(level);
         }
-        let mut ctx = Ctx {
-            cfg: &self.cfg,
-            injector: self.injector.as_deref_mut(),
-        };
+        let mut ctx = ctx!(self);
         for link in &mut self.links {
             link.reset_all(&mut ctx);
         }
@@ -366,10 +404,7 @@ impl Daemon {
 
     /// Clean exit: give every button back to its device.
     fn shutdown(&mut self) {
-        let mut ctx = Ctx {
-            cfg: &self.cfg,
-            injector: self.injector.as_deref_mut(),
-        };
+        let mut ctx = ctx!(self);
         for link in &mut self.links {
             link.restore_all(&mut ctx);
         }
@@ -385,23 +420,39 @@ fn mtime(path: &Path) -> Option<SystemTime> {
 struct Session {
     name: String,
     kind: DeviceKind,
-    battery: Option<String>,
-    /// Name of the applied profile, if one matched.
-    profile: Option<String>,
+    battery: Option<Battery>,
+    /// Index into `Config::profiles` of the applied profile, if one matched.
+    profile: Option<usize>,
     features: FeatureTable,
+    /// The device's reprogrammable controls (empty if it has none).
+    controls: Vec<Control>,
     /// Index of the ReprogControls feature (diverted button events use it).
     reprog_index: Option<u8>,
     /// Index of WirelessDeviceStatus (direct connections announce reconnects).
     status_index: Option<u8>,
+    /// Index of the battery feature, and whether it is UnifiedBattery.
+    battery_index: Option<(u8, bool)>,
     /// Buttons currently diverted to us and their actions.
     diverted: BTreeMap<u16, Action>,
+    /// Buttons currently diverted *with* raw movement reporting (gestures).
+    raw_xy: BTreeSet<u16>,
     /// Buttons reported as held down in the last event.
     pressed: Vec<u16>,
+    /// The gesture button being held, with the movement so far.
+    gesture: Option<GestureState>,
     /// Pointer speed / DPI to return to when slow mode is switched off.
     base_speed: Option<u16>,
     base_dpi: Option<u16>,
     /// The slow setting currently active, if slow mode is on.
     slow: Option<SlowMode>,
+}
+
+/// Movement accumulated while a gesture button is held.
+#[derive(Debug, Clone, Copy)]
+struct GestureState {
+    cid: u16,
+    dx: i32,
+    dy: i32,
 }
 
 /// A device that must be (re)configured at `due`.
@@ -418,6 +469,8 @@ struct Link {
     pending: BTreeMap<u8, PendingSetup>,
     /// Devices the receiver remembers, connected or not.
     paired: Vec<PairedDevice>,
+    /// Slots already warned about a low battery (until it is charged).
+    battery_warned: BTreeSet<u8>,
     /// Set when the reader threads report the device is gone.
     lost: Option<String>,
     /// Something the interface shows changed.
@@ -432,6 +485,7 @@ impl Link {
             sessions: BTreeMap::new(),
             pending: BTreeMap::new(),
             paired: Vec::new(),
+            battery_warned: BTreeSet::new(),
             lost: None,
             changed: true,
         }
@@ -447,9 +501,12 @@ impl Link {
                 name: s.name.clone(),
                 kind: s.kind.to_string(),
                 online: true,
-                battery: s.battery.clone(),
+                battery: s.battery.map(|b| b.to_string()),
                 dpi: s.base_dpi,
-                profile: s.profile.clone(),
+                profile: s
+                    .profile
+                    .and_then(|i| cfg.profiles.get(i))
+                    .map(|p| p.name.clone()),
                 remapped: s.diverted.len(),
             })
             .collect();
@@ -567,9 +624,14 @@ impl Link {
         if f.software_id() != 0 {
             return;
         }
-        if Some(f.b2()) == session.reprog_index && f.function() == 0 {
-            self.on_buttons(ctx, slot, f.params());
-        } else if Some(f.b2()) == session.status_index && f.function() == 0 && f.params()[0] == 1 {
+        let (index, function, params) = (Some(f.b2()), f.function(), f.params());
+        if index == session.reprog_index && function == 0 {
+            self.on_buttons(ctx, slot, params);
+        } else if index == session.reprog_index && function == 1 {
+            self.on_raw_xy(slot, params);
+        } else if index == session.battery_index.map(|(i, _)| i) && function == 0 {
+            self.on_battery(ctx, slot, params);
+        } else if index == session.status_index && function == 0 && params[0] == 1 {
             // WirelessDeviceStatus "reconnection": the device lost its settings.
             info!("slot {slot}: device reports a reconnection, re-applying profile");
             self.schedule(slot, SETUP_BACKOFF[0]);
@@ -602,7 +664,11 @@ impl Link {
 
         for (cid, action) in released {
             debug!("slot {slot}: button {} released", describe(cid));
-            self.perform(ctx, slot, &action, false);
+            if let Action::Gesture(g) = &action {
+                self.finish_gesture(ctx, slot, cid, g);
+            } else {
+                self.perform(ctx, slot, &action, false);
+            }
         }
         for (cid, action) in pressed {
             info!(
@@ -610,7 +676,88 @@ impl Link {
                 describe(cid),
                 summarize(&action)
             );
-            self.perform(ctx, slot, &action, true);
+            if let Action::Gesture(_) = action {
+                if let Some(s) = self.sessions.get_mut(&slot) {
+                    s.gesture = Some(GestureState { cid, dx: 0, dy: 0 });
+                }
+            } else {
+                self.perform(ctx, slot, &action, true);
+            }
+        }
+    }
+
+    /// Movement reported while a gesture button is held.
+    fn on_raw_xy(&mut self, slot: u8, params: &[u8]) {
+        let Some(g) = self
+            .sessions
+            .get_mut(&slot)
+            .and_then(|s| s.gesture.as_mut())
+        else {
+            return;
+        };
+        if params.len() >= 4 {
+            g.dx += i32::from(i16::from_be_bytes([params[0], params[1]]));
+            g.dy += i32::from(i16::from_be_bytes([params[2], params[3]]));
+        }
+    }
+
+    /// The gesture button was released: run the action for the movement.
+    fn finish_gesture(&mut self, ctx: &mut Ctx, slot: u8, cid: u16, gesture: &Gesture) {
+        let state = self.sessions.get_mut(&slot).and_then(|s| s.gesture.take());
+        let (dx, dy) = match state {
+            Some(g) if g.cid == cid => (g.dx, g.dy),
+            _ => (0, 0),
+        };
+        match gesture.pick(dx, dy) {
+            Some(action) => {
+                info!("slot {slot}: gesture ({dx}, {dy}) -> {}", summarize(action));
+                let action = action.clone();
+                self.perform(ctx, slot, &action, true);
+                self.perform(ctx, slot, &action, false);
+            }
+            None => debug!("slot {slot}: gesture ({dx}, {dy}) has no action"),
+        }
+    }
+
+    /// Spontaneous battery report.
+    fn on_battery(&mut self, ctx: &mut Ctx, slot: u8, params: &[u8]) {
+        let Some(s) = self.sessions.get_mut(&slot) else {
+            return;
+        };
+        let unified = s.battery_index.is_some_and(|(_, u)| u);
+        let parsed = if unified {
+            Battery::from_unified(params)
+        } else {
+            Battery::from_legacy(params)
+        };
+        if let Some(b) = parsed {
+            if s.battery != Some(b) {
+                debug!("slot {slot}: battery {b}");
+                s.battery = Some(b);
+                self.changed = true;
+            }
+            self.check_battery(ctx, slot);
+        }
+    }
+
+    /// Warns once when a battery falls to the configured level; the warning
+    /// re-arms after charging (or 5 points above the level).
+    fn check_battery(&mut self, ctx: &mut Ctx, slot: u8) {
+        let level = ctx.cfg.general.battery_warning;
+        let Some(s) = self.sessions.get(&slot) else {
+            return;
+        };
+        let Some(b) = s.battery else {
+            return;
+        };
+        if level == 0 || b.charging || b.full || b.percent > level.saturating_add(5) {
+            self.battery_warned.remove(&slot);
+        } else if b.percent <= level && self.battery_warned.insert(slot) {
+            warn!("slot {slot}: \"{}\" battery low ({}%)", s.name, b.percent);
+            ctx.notices.push((
+                "Battery low".into(),
+                format!("{}: {}% left. Charge it soon.", s.name, b.percent),
+            ));
         }
     }
 
@@ -626,9 +773,28 @@ impl Link {
                 Some(inj) => inj.button(*button, down),
                 None => Ok(()),
             },
+            Action::Scroll {
+                vertical,
+                horizontal,
+            } if down => match ctx.injector.as_deref_mut() {
+                Some(inj) => inj.scroll(*vertical, *horizontal),
+                None => Ok(()),
+            },
+            Action::Sequence(steps) if down => match ctx.injector.as_deref_mut() {
+                Some(inj) => run_sequence(inj, steps),
+                None => Ok(()),
+            },
             Action::Command { program, args } if down => spawn(program, args),
             Action::Toggle(slow) if down => {
                 self.toggle_slow_mode(slot, *slow);
+                Ok(())
+            }
+            Action::CycleDpi(values) if down => {
+                self.cycle_dpi(slot, values);
+                Ok(())
+            }
+            Action::ChangeHost(target) if down => {
+                self.change_host(slot, *target);
                 Ok(())
             }
             _ => Ok(()),
@@ -658,6 +824,55 @@ impl Link {
         }
     }
 
+    /// Moves to the next DPI of `values` (after the current one).
+    fn cycle_dpi(&mut self, slot: u8, values: &[u16]) {
+        let Some(s) = self.sessions.get_mut(&slot) else {
+            return;
+        };
+        let next = s
+            .base_dpi
+            .and_then(|cur| values.iter().position(|&v| v == cur))
+            .map_or(values[0], |i| values[(i + 1) % values.len()]);
+        match Device::new(&mut self.t, slot, &s.features).set_dpi(next) {
+            Ok(()) => {
+                s.base_dpi = Some(next);
+                s.slow = None;
+                self.changed = true;
+                info!("slot {slot}: DPI {next}");
+            }
+            Err(e) => warn!("slot {slot}: cannot set DPI {next}: {e}"),
+        }
+    }
+
+    /// Easy-Switch: sends the device to another computer.
+    fn change_host(&mut self, slot: u8, target: HostTarget) {
+        let Some(s) = self.sessions.get(&slot) else {
+            return;
+        };
+        let mut dev = Device::new(&mut self.t, slot, &s.features);
+        let result = dev.hosts().and_then(|(count, current)| {
+            let host = match target {
+                HostTarget::Next => (current + 1) % count.max(1),
+                HostTarget::Index(i) if i < count => i,
+                HostTarget::Index(i) => {
+                    warn!(
+                        "slot {slot}: host {} does not exist (the device has {count})",
+                        i + 1
+                    );
+                    return Ok(());
+                }
+            };
+            if host == current {
+                return Ok(());
+            }
+            info!("slot {slot}: switching to computer {} of {count}", host + 1);
+            dev.set_host(host)
+        });
+        if let Err(e) = result {
+            warn!("slot {slot}: cannot switch computer: {e}");
+        }
+    }
+
     // ------------------------------------------------------------------
     // Configuring devices
     // ------------------------------------------------------------------
@@ -682,11 +897,12 @@ impl Link {
             .collect();
         for slot in due {
             let attempt = self.pending.get(&slot).map_or(0, |p| p.attempt);
-            match self.setup(ctx.cfg, slot) {
+            match self.setup(ctx.cfg, ctx.app, slot) {
                 Ok(session) => {
                     self.pending.remove(&slot);
                     self.sessions.insert(slot, session);
                     self.changed = true;
+                    self.check_battery(ctx, slot);
                 }
                 Err(e) if attempt + 1 < SETUP_BACKOFF.len() => {
                     debug!("slot {slot}: not ready yet ({e}), retrying");
@@ -707,7 +923,7 @@ impl Link {
     }
 
     /// Identifies the device in `slot` and applies its profile.
-    fn setup(&mut self, cfg: &Config, slot: u8) -> Result<Session, HidppError> {
+    fn setup(&mut self, cfg: &Config, app: Option<&str>, slot: u8) -> Result<Session, HidppError> {
         let t = &mut self.t;
         let (major, minor) = t.ping(slot).ok_or(HidppError::Timeout)?;
         if major < 2 {
@@ -718,36 +934,48 @@ impl Link {
         let mut dev = Device::new(t, slot, &features);
         let name = dev.name().unwrap_or_else(|_| "unknown device".into());
         let kind = dev.kind().unwrap_or(DeviceKind::Other);
-        let battery_level = dev.battery().ok();
-        let battery = battery_level
-            .as_ref()
+        let battery = dev.battery().ok();
+        let battery_text = battery
             .map(|b| format!(", battery {b}"))
             .unwrap_or_default();
+        let battery_index = features
+            .index_of(id::UNIFIED_BATTERY)
+            .map(|i| (i, true))
+            .or_else(|| features.index_of(id::BATTERY_STATUS).map(|i| (i, false)));
 
         let mut session = Session {
             reprog_index: features.index_of(id::REPROG_CONTROLS_V4),
             status_index: features.index_of(id::WIRELESS_DEVICE_STATUS),
+            battery_index,
             name: name.clone(),
             kind,
-            battery: battery_level,
+            battery,
             profile: None,
             features: features.clone(),
+            controls: Vec::new(),
             diverted: BTreeMap::new(),
+            raw_xy: BTreeSet::new(),
             pressed: Vec::new(),
+            gesture: None,
             base_speed: None,
             base_dpi: None,
             slow: None,
         };
 
-        let Some(profile) = cfg.profile_for(&name, kind) else {
-            info!("slot {slot}: \"{name}\" ({kind}) connected{battery}; no profile matches, leaving it unchanged");
+        let Some(index) = cfg
+            .profiles
+            .iter()
+            .position(|p| p.matcher.fits(&name, kind))
+        else {
+            info!("slot {slot}: \"{name}\" ({kind}) connected{battery_text}; no profile matches, leaving it unchanged");
             return Ok(session);
         };
+        let profile = &cfg.profiles[index];
         info!(
-            "slot {slot}: \"{name}\" ({kind}) connected{battery}; applying profile \"{}\"",
+            "slot {slot}: \"{name}\" ({kind}) connected{battery_text}; applying profile \"{}\"",
             profile.name
         );
-        session.profile = Some(profile.name.clone());
+        session.profile = Some(index);
         apply_settings(&mut dev, &features, profile, slot);
         if features.has(id::POINTER_SPEED) {
             session.base_speed = profile.pointer_speed.or_else(|| dev.pointer_speed().ok());
@@ -755,8 +983,58 @@ impl Link {
         if features.has(id::ADJUSTABLE_DPI) {
             session.base_dpi = profile.dpi.or_else(|| dev.dpi().ok());
         }
-        session.diverted = divert_buttons(&mut dev, &features, profile, slot)?;
+        let wanted = profile.buttons_for(app);
+        if !wanted.is_empty() || !profile.apps.is_empty() {
+            if features.has(id::REPROG_CONTROLS_V4) {
+                session.controls = dev.controls()?;
+            } else if !wanted.is_empty() {
+                warn!("slot {slot}: device has no reprogrammable buttons, ignoring the buttons section");
+            }
+        }
+        apply_buttons(
+            &mut dev,
+            &session.controls,
+            &mut session.diverted,
+            &mut session.raw_xy,
+            wanted,
+            slot,
+        );
+        info!("slot {slot}: {} button(s) remapped", session.diverted.len());
         Ok(session)
+    }
+
+    /// The foreground program changed: switch every device to the buttons
+    /// configured for it.
+    fn refresh_buttons(&mut self, ctx: &mut Ctx) {
+        for (slot, s) in self.sessions.iter_mut() {
+            let Some(profile) = s.profile.and_then(|i| ctx.cfg.profiles.get(i)) else {
+                continue;
+            };
+            let wanted = profile.buttons_for(ctx.app);
+            if wanted == s.diverted {
+                continue;
+            }
+            // Let go of anything held with the old mapping first.
+            release_session(ctx, s);
+            s.pressed.clear();
+            s.gesture = None;
+            let mut dev = Device::new(&mut self.t, *slot, &s.features);
+            let before = s.diverted.len();
+            apply_buttons(
+                &mut dev,
+                &s.controls,
+                &mut s.diverted,
+                &mut s.raw_xy,
+                wanted,
+                *slot,
+            );
+            debug!(
+                "slot {slot}: buttons for {} ({before} -> {} remapped)",
+                ctx.app.unwrap_or("desktop"),
+                s.diverted.len()
+            );
+            self.changed = true;
+        }
     }
 
     /// Gives every diverted button back to the firmware and undoes slow mode.
@@ -765,7 +1043,8 @@ impl Link {
         for (slot, s) in &self.sessions {
             let mut dev = Device::new(&mut self.t, *slot, &s.features);
             for cid in s.diverted.keys() {
-                if let Err(e) = dev.set_diverted(*cid, false) {
+                let raw = s.raw_xy.contains(cid).then_some(false);
+                if let Err(e) = dev.set_reporting(*cid, false, raw) {
                     debug!("slot {slot}: cannot restore button {}: {e}", describe(*cid));
                 }
             }
@@ -810,6 +1089,92 @@ fn release_session(ctx: &mut Ctx, s: &Session) {
     }
 }
 
+/// Makes the device's diverted buttons match `wanted`: buttons no longer
+/// wanted are given back, new ones are diverted (with movement reporting
+/// for gestures), and actions are updated.
+fn apply_buttons(
+    dev: &mut Device,
+    controls: &[Control],
+    diverted: &mut BTreeMap<u16, Action>,
+    raw_xy: &mut BTreeSet<u16>,
+    wanted: BTreeMap<u16, Action>,
+    slot: u8,
+) {
+    let gone: Vec<u16> = diverted
+        .keys()
+        .filter(|c| !wanted.contains_key(c))
+        .copied()
+        .collect();
+    for cid in gone {
+        let was_raw = raw_xy.remove(&cid);
+        if let Err(e) = dev.set_reporting(cid, false, was_raw.then_some(false)) {
+            debug!("slot {slot}: cannot restore button {}: {e}", describe(cid));
+        }
+        diverted.remove(&cid);
+    }
+    for (cid, action) in wanted {
+        let Some(control) = controls.iter().find(|c| c.cid == cid) else {
+            if !controls.is_empty() {
+                warn!("slot {slot}: this device has no button {}", describe(cid));
+            }
+            continue;
+        };
+        if !control.is_divertable() {
+            warn!("slot {slot}: button {} cannot be remapped", describe(cid));
+            continue;
+        }
+        let gesture = matches!(action, Action::Gesture(_));
+        let raw = gesture && control.supports_raw_xy();
+        if gesture && !raw {
+            warn!(
+                "slot {slot}: button {} cannot report movement; its gesture will only do the \"click\" action",
+                describe(cid)
+            );
+        }
+        let was_raw = raw_xy.contains(&cid);
+        let already = diverted.contains_key(&cid) && was_raw == raw;
+        if !already {
+            // Only touch the raw-XY setting when it has to change.
+            let raw_change = (raw || was_raw).then_some(raw);
+            if let Err(e) = dev.set_reporting(cid, true, raw_change) {
+                warn!("slot {slot}: cannot remap button {}: {e}", describe(cid));
+                continue;
+            }
+        }
+        debug!(
+            "slot {slot}: button {} -> {}",
+            describe(cid),
+            summarize(&action)
+        );
+        if raw {
+            raw_xy.insert(cid);
+        } else {
+            raw_xy.remove(&cid);
+        }
+        diverted.insert(cid, action);
+    }
+}
+
+/// Runs the steps of a `sequence` action. Pauses block the service for
+/// their duration (limited to a few seconds by the configuration check).
+fn run_sequence(inj: &mut dyn Injector, steps: &[Step]) -> std::io::Result<()> {
+    for step in steps {
+        match step {
+            Step::Keys(keys) => {
+                keys.iter().try_for_each(|k| inj.key(k, true))?;
+                keys.iter().rev().try_for_each(|k| inj.key(k, false))?;
+            }
+            Step::Text(text) => inj.text(text)?,
+            Step::Click(b) => {
+                inj.button(*b, true)?;
+                inj.button(*b, false)?;
+            }
+            Step::Delay(ms) => thread::sleep(Duration::from_millis(u64::from(*ms))),
+        }
+    }
+    Ok(())
+}
+
 /// Lowers speed or DPI for slow mode.
 fn set_slow(dev: &mut Device, slow: SlowMode) -> Result<(), HidppError> {
     match slow {
@@ -834,100 +1199,140 @@ fn restore_normal(
     }
 }
 
-/// Applies speed, DPI and wheel settings. Failures are logged, not fatal:
+/// Logs the outcome of applying one setting.
+fn report(slot: u8, what: &str, result: Result<String, HidppError>) {
+    match result {
+        Ok(done) => info!("slot {slot}: {what} {done}"),
+        Err(HidppError::FeatureNotSupported(_)) => {
+            warn!("slot {slot}: this device has no {what} setting, ignoring it")
+        }
+        Err(e) => warn!("slot {slot}: cannot set {what}: {e}"),
+    }
+}
+
+/// Fails with "not supported" unless the device has one of `features`.
+fn require(features: &FeatureTable, wanted: &[u16]) -> Result<(), HidppError> {
+    if wanted.iter().any(|f| features.has(*f)) {
+        Ok(())
+    } else {
+        Err(HidppError::FeatureNotSupported(wanted[0]))
+    }
+}
+
+/// Applies the profile's device settings. Failures are logged, not fatal:
 /// a profile may list settings that only some devices support.
 fn apply_settings(dev: &mut Device, features: &FeatureTable, profile: &Profile, slot: u8) {
     if let Some(speed) = profile.pointer_speed {
-        if features.has(id::POINTER_SPEED) {
-            match dev.set_pointer_speed(speed) {
-                Ok(()) => info!(
-                    "slot {slot}: pointer speed set to {:.2}",
-                    f32::from(speed) / 256.0
-                ),
-                Err(e) => warn!("slot {slot}: cannot set pointer speed: {e}"),
-            }
-        } else {
-            warn!("slot {slot}: device has no adjustable pointer speed, ignoring pointer_speed");
-        }
+        let r = require(features, &[id::POINTER_SPEED]).and_then(|()| dev.set_pointer_speed(speed));
+        report(
+            slot,
+            "pointer speed",
+            r.map(|()| format!("set to {:.2}", f32::from(speed) / 256.0)),
+        );
     }
     if let Some(dpi) = profile.dpi {
-        if features.has(id::ADJUSTABLE_DPI) {
+        let r = require(features, &[id::ADJUSTABLE_DPI]).and_then(|()| {
             if let Ok(choices) = dev.dpi_choices() {
                 if !choices.contains(dpi) {
                     warn!("slot {slot}: {dpi} DPI is not supported (valid: {choices})");
                 }
             }
-            match dev.set_dpi(dpi) {
-                Ok(()) => info!("slot {slot}: DPI set to {dpi}"),
-                Err(e) => warn!("slot {slot}: cannot set DPI: {e}"),
-            }
-        } else {
-            warn!("slot {slot}: device has no adjustable DPI, ignoring dpi");
-        }
+            dev.set_dpi(dpi)
+        });
+        report(slot, "DPI", r.map(|()| format!("set to {dpi}")));
     }
     if profile.hires_wheel.is_some() || profile.invert_wheel.is_some() {
-        if !features.has(id::HIRES_WHEEL) {
-            warn!("slot {slot}: device has no configurable wheel, ignoring wheel settings");
-            return;
-        }
-        let result = dev.wheel_mode().and_then(|mut flags| {
-            flags &= !0x01; // never divert the wheel itself
-            if let Some(on) = profile.hires_wheel {
-                flags = if on { flags | 0x02 } else { flags & !0x02 };
+        let r = require(features, &[id::HIRES_WHEEL])
+            .and_then(|()| dev.wheel_mode())
+            .and_then(|mut flags| {
+                flags &= !0x01; // never divert the wheel itself
+                if let Some(on) = profile.hires_wheel {
+                    flags = if on { flags | 0x02 } else { flags & !0x02 };
+                }
+                if let Some(on) = profile.invert_wheel {
+                    flags = if on { flags | 0x04 } else { flags & !0x04 };
+                }
+                dev.set_wheel_mode(flags).map(|()| flags)
+            });
+        report(
+            slot,
+            "wheel",
+            r.map(|f| {
+                format!(
+                    "high-resolution {}, inverted {}",
+                    on_off(f & 0x02 != 0),
+                    on_off(f & 0x04 != 0)
+                )
+            }),
+        );
+    }
+    if let Some(mode) = profile.smartshift {
+        let r = require(features, &[id::SMART_SHIFT_ENHANCED, id::SMART_SHIFT])
+            .and_then(|()| dev.set_smart_shift(mode));
+        report(slot, "SmartShift", r.map(|()| format!("set to {mode}")));
+    }
+    if let Some(inverted) = profile.thumb_wheel_invert {
+        let r = require(features, &[id::THUMB_WHEEL])
+            .and_then(|()| dev.set_thumb_wheel_inverted(inverted));
+        report(
+            slot,
+            "thumb wheel",
+            r.map(|()| format!("inverted {}", on_off(inverted))),
+        );
+    }
+    if let Some(hz) = profile.report_rate {
+        let r = require(features, &[id::REPORT_RATE]).and_then(|()| {
+            if let Ok(rates) = dev.report_rates() {
+                if !rates.contains(&hz) {
+                    warn!("slot {slot}: {hz} Hz is not supported (valid: {rates:?})");
+                }
             }
-            if let Some(on) = profile.invert_wheel {
-                flags = if on { flags | 0x04 } else { flags & !0x04 };
-            }
-            dev.set_wheel_mode(flags).map(|()| flags)
+            dev.set_report_rate(hz)
         });
-        match result {
-            Ok(flags) => info!(
-                "slot {slot}: wheel high-resolution {}, inverted {}",
-                on_off(flags & 0x02 != 0),
-                on_off(flags & 0x04 != 0)
-            ),
-            Err(e) => warn!("slot {slot}: cannot set wheel mode: {e}"),
-        }
+        report(slot, "report rate", r.map(|()| format!("set to {hz} Hz")));
+    }
+    if let Some(special) = profile.fn_keys_special {
+        let r = require(
+            features,
+            &[
+                id::FN_INVERSION_K375S,
+                id::FN_INVERSION_NEW,
+                id::FN_INVERSION,
+            ],
+        )
+        .and_then(|()| dev.set_fn_keys_special(special));
+        let what = if special {
+            "special functions first"
+        } else {
+            "F1-F12 first"
+        };
+        report(slot, "function keys", r.map(|()| what.to_owned()));
+    }
+    if let Some(mask) = profile.disable_keys {
+        let r = require(features, &[id::DISABLE_KEYS]).and_then(|()| {
+            let possible = dev.disableable_keys().unwrap_or(0xFF);
+            if mask & !possible != 0 {
+                warn!("slot {slot}: some keys in disable_keys cannot be disabled on this keyboard");
+            }
+            dev.set_disabled_keys(mask & possible)
+                .map(|()| mask & possible)
+        });
+        report(slot, "disabled keys", r.map(disabled_key_names));
     }
 }
 
-/// Diverts the profile's buttons; returns the ones actually diverted.
-fn divert_buttons(
-    dev: &mut Device,
-    features: &FeatureTable,
-    profile: &Profile,
-    slot: u8,
-) -> Result<BTreeMap<u16, Action>, HidppError> {
-    let mut diverted = BTreeMap::new();
-    if profile.buttons.is_empty() {
-        return Ok(diverted);
+/// `0x09` → `"capslock, insert"`.
+fn disabled_key_names(mask: u8) -> String {
+    let names: Vec<&str> = DISABLE_KEY_NAMES
+        .iter()
+        .filter(|(_, b)| mask & b != 0)
+        .map(|(n, _)| *n)
+        .collect();
+    if names.is_empty() {
+        "none".into()
+    } else {
+        names.join(", ")
     }
-    if !features.has(id::REPROG_CONTROLS_V4) {
-        warn!("slot {slot}: device has no reprogrammable buttons, ignoring the buttons section");
-        return Ok(diverted);
-    }
-    let controls = dev.controls()?;
-    for (cid, action) in &profile.buttons {
-        match controls.iter().find(|c| c.cid == *cid) {
-            None => warn!("slot {slot}: this device has no button {}", describe(*cid)),
-            Some(c) if !c.is_divertable() => {
-                warn!("slot {slot}: button {} cannot be remapped", describe(*cid))
-            }
-            Some(_) => match dev.set_diverted(*cid, true) {
-                Ok(()) => {
-                    debug!(
-                        "slot {slot}: button {} -> {}",
-                        describe(*cid),
-                        summarize(action)
-                    );
-                    diverted.insert(*cid, action.clone());
-                }
-                Err(e) => warn!("slot {slot}: cannot remap button {}: {e}", describe(*cid)),
-            },
-        }
-    }
-    info!("slot {slot}: {} button(s) remapped", diverted.len());
-    Ok(diverted)
 }
 
 /// Starts a program without waiting for it (a helper thread reaps it).
@@ -947,6 +1352,7 @@ pub fn describe(cid: u16) -> String {
     }
 }
 
+/// Short description of an action for the log.
 fn summarize(action: &Action) -> String {
     match action {
         Action::Keys(keys) => keys.iter().map(|k| k.name).collect::<Vec<_>>().join("+"),
@@ -956,6 +1362,15 @@ fn summarize(action: &Action) -> String {
             format!("toggle speed {:.2}", f32::from(*s) / 256.0)
         }
         Action::Toggle(SlowMode::Dpi(d)) => format!("toggle {d} DPI"),
+        Action::CycleDpi(v) => format!("cycle DPI {v:?}"),
+        Action::Scroll {
+            vertical,
+            horizontal,
+        } => format!("scroll ({vertical}, {horizontal})"),
+        Action::ChangeHost(HostTarget::Next) => "next computer".into(),
+        Action::ChangeHost(HostTarget::Index(i)) => format!("computer {}", i + 1),
+        Action::Sequence(steps) => format!("sequence of {} steps", steps.len()),
+        Action::Gesture(_) => "gesture".into(),
         Action::Disable => "nothing".into(),
     }
 }
@@ -965,5 +1380,31 @@ fn on_off(b: bool) -> &'static str {
         "on"
     } else {
         "off"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn names_disabled_keys() {
+        assert_eq!(disabled_key_names(0), "none");
+        assert_eq!(disabled_key_names(0x09), "capslock, insert");
+    }
+
+    #[test]
+    fn summarizes_actions() {
+        assert_eq!(
+            summarize(&Action::ChangeHost(HostTarget::Index(1))),
+            "computer 2"
+        );
+        assert_eq!(
+            summarize(&Action::Scroll {
+                vertical: 0,
+                horizontal: -3
+            }),
+            "scroll (0, -3)"
+        );
     }
 }

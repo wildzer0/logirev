@@ -50,6 +50,7 @@ match = { kind = "mouse" }
 | Setting | Meaning | Default |
 |---|---|---|
 | `product_id` | `"auto"` uses every Logitech receiver and device found. Write a USB product id (e.g. `"c548"` = Bolt, `"c52b"` = Unifying) to use only that kind. | `"auto"` |
+| `battery_warning` | show a notification when a battery drops to this percentage; `0` = never. You are warned once, and again only after charging. | `15` |
 
 ---
 
@@ -96,6 +97,11 @@ All optional: leave one out and the device keeps its own value.
 | `pointer_speed` | `0.18` … `2.0` (1.0 = normal) | only devices that have the *PointerSpeed* feature (the MX Ergo S does not). |
 | `hires_wheel` | `true` / `false` | high-resolution scrolling. Without Options+, Windows may scroll **very fast**: try it first. |
 | `invert_wheel` | `true` / `false` | reverses the scroll direction. |
+| `smartshift` | `{ mode = "smart", threshold = 10 }`, `{ mode = "ratchet" }`, `{ mode = "free" }` | wheels with SmartShift (MX Master): *smart* clicks, but spins freely when you scroll fast (lower threshold = frees sooner); *ratchet* always clicks; *free* always spins. |
+| `thumb_wheel_invert` | `true` / `false` | reverses the thumb wheel (MX Master). |
+| `report_rate` | `125` … `1000` (Hz) | how often the mouse reports; gaming mice only. `scan` lists the accepted values. |
+| `function_keys` | `"standard"` / `"special"` | keyboards: whether F1–F12 act as F-keys (`standard`) or as media keys (`special`) without holding Fn. |
+| `disable_keys` | e.g. `["capslock", "insert"]` | keyboards: keys that do nothing. Names: `capslock`, `numlock`, `scrolllock`, `insert`, `windows`. |
 
 ---
 
@@ -132,12 +138,74 @@ scan can be changed (left and right click never are).
 | `command` | starts a program | `{ action = "command", command = "calc.exe" }` |
 | `toggle-dpi` | slow mode: first press switches to this DPI, second press back | `{ action = "toggle-dpi", dpi = 400 }` |
 | `toggle-pointer-speed` | the same, for devices with *PointerSpeed* | `{ action = "toggle-pointer-speed", speed = 0.4 }` |
+| `cycle-dpi` | each press moves to the next DPI of the list | `{ action = "cycle-dpi", dpi = [400, 800, 1600] }` |
+| `scroll` | scrolls `up`, `down`, `left` or `right` by `amount` wheel notches | `{ action = "scroll", direction = "right", amount = 3 }` |
+| `change-host` | Easy-Switch: sends the device to computer `1`, `2`, `3` or the `"next"` one | `{ action = "change-host", host = "next" }` |
+| `sequence` | several steps in a row (a simple macro, see below) | `{ action = "sequence", steps = [ { keys = "Ctrl+C" } ] }` |
+| `gesture` | hold the button and move the pointer (see below) | `{ action = "gesture", up = { ... } }` |
 | `disable` | the button does nothing | `{ action = "disable" }` |
 | `default` | normal behaviour (same as not listing the button) | `{ action = "default" }` |
 
 A program with arguments:
 `{ action = "command", command = "notepad.exe", args = ["C:\\notes.txt"] }`
 — in Windows paths write `\\` for every `\`.
+
+### Sequences (simple macros)
+
+A `sequence` runs its `steps` in order. Each step is exactly one of:
+
+| Step | Meaning |
+|---|---|
+| `{ keys = "Ctrl+C" }` | press and release a shortcut |
+| `{ text = "Hello" }` | type text |
+| `{ click = "left" }` | click a mouse button |
+| `{ delay = 200 }` | wait, in milliseconds (at most 2000 per step, 5000 in total) |
+
+Short sequences fit on one line:
+
+```toml
+[profile.buttons]
+back = { action = "sequence", steps = [ { keys = "Ctrl+A" }, { keys = "Ctrl+C" } ] }
+```
+
+Longer ones are easier to read written as their own block:
+
+```toml
+[profile.buttons.back]
+action = "sequence"
+steps = [
+    { keys = "Ctrl+A" },
+    { keys = "Ctrl+C" },
+    { delay = 100 },
+    { keys = "Alt+Tab" },
+]
+```
+
+(A `{ ... }` group must stay on one line; when it gets long, use a block
+like the one above.)
+
+On Linux, `text` can only type the characters of a US keyboard (letters,
+digits, common punctuation).
+
+### Gestures
+
+Hold a gesture button and move the pointer up, down, left or right: each
+direction runs its own action, and a press without movement runs `click`.
+While the button is held the pointer stays still. Any direction can be left
+out; `threshold` (default 50) is how far you must move.
+
+```toml
+[profile.buttons.gesture]
+action = "gesture"
+up    = { action = "keys", keys = "Super+Tab" }          # task view
+down  = { action = "keys", keys = "Super+D" }            # show desktop
+left  = { action = "keys", keys = "Ctrl+Super+Left" }    # previous desktop
+right = { action = "keys", keys = "Ctrl+Super+Right" }   # next desktop
+click = { action = "click", button = "middle" }          # no movement
+```
+
+Only buttons marked **gestures** by `logirevctl scan` can follow the
+movement; on other buttons a gesture only performs its `click` action.
 
 ### Key names
 
@@ -162,7 +230,40 @@ Upper/lower case does not matter. Combine keys with `+`.
 
 ---
 
-## 6. Wireshark capture
+## 6. Different buttons in different programs (Windows)
+
+After a profile's `[profile.buttons]`, add one `[[profile.app]]` block per
+group of programs. While one of those programs is the window in front, its
+buttons replace (or add to) the profile's buttons; when you switch to another
+program, the profile's own buttons come back.
+
+```toml
+[[profile]]
+name = "MX Ergo"
+match = { name = "MX Ergo" }
+
+[profile.buttons]
+back = { action = "keys", keys = "Alt+Left" }
+
+[[profile.app]]
+match = ["photoshop.exe"]
+buttons.back = { action = "keys", keys = "Ctrl+Z" }        # undo
+buttons.tilt_left = { action = "keys", keys = "LeftBracket" }   # smaller brush
+
+[[profile.app]]
+match = ["chrome.exe", "msedge.exe", "firefox.exe"]
+buttons.back = { action = "default" }   # the browser handles Back itself
+```
+
+- `match` lists program file names, as shown in Task Manager → *Details*
+  (`.exe` may be left out; upper/lower case does not matter).
+- The first `[[profile.app]]` that lists the program is used.
+- `{ action = "default" }` inside an app block means "normal behaviour in
+  this program", even if the profile remaps the button.
+- Programs started "as administrator" are not recognised (Windows does not
+  tell other programs about them); the profile's own buttons apply there.
+
+## 7. Wireshark capture
 
 Set `pcap = "logirev.pcap"` (or start with `--pcap logirev.pcap`) to record
 every message exchanged with the devices. Open the file with

@@ -12,16 +12,23 @@ cable or Bluetooth. It was built and tested with an **MX Ergo S** trackball.
 - **Light:** about 3 MB of memory and no noticeable CPU use.
 - **Plug & play:** plug in the receiver or wake up the device and its
   settings are applied by themselves.
-- Remap buttons to **shortcuts**, **mouse clicks** or **programs**.
-- A **slow mode** button for precise work.
-- Set **DPI / speed** and the **scroll wheel**.
+- Remap buttons to **shortcuts**, **mouse clicks**, **scrolling**,
+  **programs**, **simple macros**, **gestures** (hold a button and move) or
+  **switching computer** (Easy-Switch).
+- **Different buttons in different programs** (Windows), e.g. the side
+  buttons do *undo / redo* only in Photoshop.
+- A **slow mode** button for precise work, or a button that **cycles DPI**.
+- Set **DPI / speed**, the **scroll wheel**, **SmartShift**, the **thumb
+  wheel**; on keyboards the **Fn keys** and **disabling Caps Lock** & co.
 - An **icon next to the clock** (Windows) showing your devices and their
-  battery, with a *Start with Windows* option.
+  battery, with a *Start with Windows* option, and a **warning when a
+  battery is low**.
 - A **log file** that never grows beyond 1 MB, and an optional recording of
   the traffic that you can open in **Wireshark**.
 
-> **Status:** early version (0.3). Tested with an MX Ergo S on a Bolt
-> receiver on Windows.
+> **Status:** version 0.3. Developed with an MX Ergo S on a Bolt receiver on
+> Windows; features of other devices (MX Master wheels, keyboards) follow
+> Logitech's protocol but have not been tried on real hardware yet.
 
 ---
 
@@ -199,6 +206,12 @@ icon next to the clock; on Linux it runs as a background service.
 **Can it start by itself when I log in?** Yes: tick *Start with Windows* in
 the icon menu. On Linux, see step 5 of the Linux instructions.
 
+**Can buttons do different things in different programs?** Yes (on
+Windows): see [per-program buttons](docs/CONFIGURATION.md#6-different-buttons-in-different-programs-windows).
+
+**Will it tell me when the battery is low?** Yes: a notification appears
+when a battery drops to 15% (change it with `battery_warning`).
+
 **What happens when I quit logirev?** It gives the buttons back to the
 device, so everything works as without logirev.
 
@@ -235,12 +248,11 @@ problem, press Ctrl+C.
 
 ## What's next
 
-1. **Battery warnings** and **per-application buttons** (e.g. tilt changes
-   tabs only in the browser).
-2. **More actions:** scrolling, switching computer (Easy-Switch), simple
-   macros, gestures.
-3. **More devices:** SmartShift and thumb wheel (MX Master), keyboard
-   backlight and Fn keys.
+Ideas for later versions:
+
+- keyboard backlight settings;
+- per-program buttons on Linux;
+- editing buttons from the devices window instead of the text file.
 
 ---
 
@@ -251,6 +263,7 @@ problem, press Ctrl+C.
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | everyone: every setting explained |
 | [docs/PROTOCOL.md](docs/PROTOCOL.md) | the curious: how logirev talks to the device |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | developers: building, code layout, releasing |
+| [docs/TESTING.md](docs/TESTING.md) | testers: the checklist used before each release |
 | [CHANGELOG.md](CHANGELOG.md) | what changed in each version |
 
 ---

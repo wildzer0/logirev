@@ -143,6 +143,62 @@ pub fn parse_chord(text: &str) -> Result<Vec<&'static Key>, String> {
     }
 }
 
+/// The key (and whether Shift is needed) that types `c` on a US keyboard
+/// layout. Used to type text on Linux, where there is no "type this
+/// character" API; Windows types any character directly.
+pub fn char_to_key(c: char) -> Option<(&'static Key, bool)> {
+    const SHIFTED: &[(char, &str)] = &[
+        ('!', "1"),
+        ('@', "2"),
+        ('#', "3"),
+        ('$', "4"),
+        ('%', "5"),
+        ('^', "6"),
+        ('&', "7"),
+        ('*', "8"),
+        ('(', "9"),
+        (')', "0"),
+        ('_', "Minus"),
+        ('+', "Equal"),
+        ('{', "LeftBracket"),
+        ('}', "RightBracket"),
+        ('|', "Backslash"),
+        (':', "Semicolon"),
+        ('"', "Apostrophe"),
+        ('~', "Grave"),
+        ('<', "Comma"),
+        ('>', "Period"),
+        ('?', "Slash"),
+    ];
+    const PLAIN: &[(char, &str)] = &[
+        (' ', "Space"),
+        ('\n', "Enter"),
+        ('\t', "Tab"),
+        ('-', "Minus"),
+        ('=', "Equal"),
+        ('[', "LeftBracket"),
+        (']', "RightBracket"),
+        ('\\', "Backslash"),
+        (';', "Semicolon"),
+        ('\'', "Apostrophe"),
+        ('`', "Grave"),
+        (',', "Comma"),
+        ('.', "Period"),
+        ('/', "Slash"),
+    ];
+    if c.is_ascii_alphanumeric() {
+        return lookup(&c.to_string()).map(|k| (k, c.is_ascii_uppercase()));
+    }
+    if let Some((_, name)) = PLAIN.iter().find(|(ch, _)| *ch == c) {
+        return lookup(name).map(|k| (k, false));
+    }
+    SHIFTED
+        .iter()
+        .find(|(ch, _)| *ch == c)
+        .and_then(|(_, name)| lookup(name))
+        .map(|k| (k, true))
+}
+
 /// A mouse button that an action can press.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -165,6 +221,32 @@ mod tests {
         assert_eq!(names, ["Ctrl", "Shift", "T"]);
         assert_eq!(lookup("Win").unwrap().name, "Super");
         assert!(parse_chord("Ctrl+Bogus").is_err());
+    }
+
+    #[test]
+    fn maps_characters_to_keys() {
+        assert_eq!(
+            char_to_key('a').map(|(k, s)| (k.name, s)),
+            Some(("A", false))
+        );
+        assert_eq!(
+            char_to_key('Q').map(|(k, s)| (k.name, s)),
+            Some(("Q", true))
+        );
+        assert_eq!(
+            char_to_key('7').map(|(k, s)| (k.name, s)),
+            Some(("7", false))
+        );
+        assert_eq!(
+            char_to_key('@').map(|(k, s)| (k.name, s)),
+            Some(("2", true))
+        );
+        assert_eq!(
+            char_to_key(' ').map(|(k, s)| (k.name, s)),
+            Some(("Space", false))
+        );
+        assert_eq!(char_to_key('\n').map(|(k, _)| k.name), Some("Enter"));
+        assert!(char_to_key('é').is_none());
     }
 
     #[test]

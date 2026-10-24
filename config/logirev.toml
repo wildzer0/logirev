@@ -20,6 +20,9 @@
 # product id, e.g. "c548" for Bolt or "c52b" for Unifying.
 product_id = "auto"
 
+# Show a notification when a battery drops to this percentage (0 = never).
+battery_warning = 15
+
 # -----------------------------------------------------------------------------
 #  Logging
 # -----------------------------------------------------------------------------
@@ -50,31 +53,60 @@ pcap_max_size = 10485760      # 10 MiB
 #      kind : mouse, trackball, keyboard, trackpad, presenter, ...
 #      Leave out "match" to make a profile that fits every device.
 #
-#  Settings (all optional; leave one out to keep the device's own value):
-#      dpi           = 1600    # sensor resolution ("logirevctl scan" shows the valid values)
+#  Settings (all optional; leave one out to keep the device's own value).
+#  "logirevctl scan" shows which ones your device has and their values.
+#      dpi           = 1600    # sensor resolution / speed
 #      pointer_speed = 1.0     # 0.18 .. 2.00, 1.0 = normal (only some devices)
-#      hires_wheel   = false   # high-resolution scrolling (see README first!)
+#      hires_wheel   = false   # high-resolution scrolling (see the docs first!)
 #      invert_wheel  = false   # reverse the scroll direction
+#      smartshift    = { mode = "smart", threshold = 10 }  # or "ratchet", "free" (MX Master)
+#      thumb_wheel_invert = false   # reverse the thumb wheel (MX Master)
+#      report_rate   = 1000    # Hz, gaming mice only
+#      function_keys = "standard"   # keyboards: "standard" F1..F12, or "special" (media)
+#      disable_keys  = ["capslock", "insert"]   # keyboards: capslock, numlock,
+#                                               # scrolllock, insert, windows
 #
 #  Buttons: one line per button you want to change, in the [profile.buttons]
 #  part. Button names: left, right, middle, back, forward, tilt_left,
-#  tilt_right, precision (= dpi_switch), gesture, smartshift -- or the numeric id
-#  shown by "logirevctl scan", written in quotes: "0x53" = { ... }
+#  tilt_right, precision (= dpi_switch), gesture, smartshift -- or the numeric
+#  id shown by "logirevctl scan", written in quotes: "0x53" = { ... }
 #
-#      { action = "keys", keys = "Ctrl+C" }          press a shortcut
-#      { action = "click", button = "middle" }       left/right/middle/back/forward
-#      { action = "command", command = "calc.exe" }  start a program
+#      { action = "keys", keys = "Ctrl+C" }            press a shortcut
+#      { action = "click", button = "middle" }         left/right/middle/back/forward
+#      { action = "scroll", direction = "left", amount = 1 }   up/down/left/right
+#      { action = "command", command = "calc.exe" }    start a program
 #      { action = "command", command = "notepad.exe", args = ["C:\\notes.txt"] }
-#      { action = "toggle-dpi", dpi = 400 }          slow mode on/off (DPI)
+#      { action = "toggle-dpi", dpi = 400 }            slow mode on/off (DPI)
 #      { action = "toggle-pointer-speed", speed = 0.4 }  slow mode (pointer speed)
-#      { action = "disable" }                        the button does nothing
-#      { action = "default" }                        normal behaviour
+#      { action = "cycle-dpi", dpi = [400, 800, 1600] }  next DPI at each press
+#      { action = "change-host", host = "next" }       Easy-Switch: 1, 2, 3 or "next"
+#      { action = "sequence", steps = [ { keys = "Ctrl+A" }, { delay = 100 }, { text = "Hi" } ] }
+#                                                      several steps (simple macro)
+#      gestures (hold the button and move; buttons marked "gestures" by scan):
+#      [profile.buttons.gesture]
+#      action = "gesture"
+#      up    = { action = "keys", keys = "Super+Tab" }
+#      down  = { action = "keys", keys = "Super+D" }
+#      left  = { action = "keys", keys = "Ctrl+Super+Left" }
+#      right = { action = "keys", keys = "Ctrl+Super+Right" }
+#      click = { action = "click", button = "middle" }
+#  (a "{ ... }" group must stay on ONE line; for long ones use a block like
+#  the gesture above. Full details in docs/CONFIGURATION.md)
+#      { action = "disable" }                          the button does nothing
+#      { action = "default" }                          normal behaviour
+#
+#  Per-program buttons (Windows): after [profile.buttons] add one or more
+#      [[profile.app]]
+#      match = ["chrome.exe", "msedge.exe"]
+#      buttons.tilt_left = { action = "keys", keys = "Ctrl+Shift+Tab" }
+#  While one of those programs is in front, its buttons replace the profile's
+#  ("default" there means: normal behaviour in that program).
 #
 #  Key names: Ctrl, Shift, Alt, Super (= Windows key), A..Z, 0..9, F1..F24,
 #  Enter, Escape, Tab, Space, Backspace, Delete, Insert, Home, End, PageUp,
 #  PageDown, Left, Right, Up, Down, PrintScreen, VolumeUp, VolumeDown,
 #  VolumeMute, MediaPlayPause, MediaNext, MediaPrevious, BrowserBack,
-#  BrowserForward, Calculator, ... (full list in the README).
+#  BrowserForward, Calculator, ... (full list in docs/CONFIGURATION.md).
 
 # --- Logitech MX Ergo S (and MX Ergo) trackball ------------------------------
 # The MX Ergo S changes speed through its DPI (sensor resolution). Remove the
@@ -93,6 +125,21 @@ tilt_right = { action = "keys", keys = "Ctrl+Tab" }       # next tab
 # { action = "default" } instead to keep the device's built-in behaviour.
 precision  = { action = "toggle-dpi", dpi = 400 }
 middle     = { action = "default" }
+
+# Example: in File Explorer the side buttons go up a folder / scroll sideways.
+# Remove the "#" at the start of the next lines to try it.
+# [[profile.app]]
+# match = ["explorer.exe"]
+# buttons.back = { action = "keys", keys = "Alt+Up" }
+# buttons.tilt_left = { action = "scroll", direction = "left", amount = 3 }
+# buttons.tilt_right = { action = "scroll", direction = "right", amount = 3 }
+
+# --- Keyboards --------------------------------------------------------------
+[[profile]]
+name = "Keyboard"
+match = { kind = "keyboard" }
+# function_keys = "standard"
+# disable_keys = ["capslock"]
 
 # --- Any other mouse or trackball -------------------------------------------
 [[profile]]

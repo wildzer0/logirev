@@ -107,6 +107,7 @@ pub fn run_service(opts: &ServiceOptions) -> Result<(), String> {
         let _ = quit.send(Event::Quit);
     })
     .map_err(|e| format!("cannot install Ctrl+C handler: {e}"))?;
+    crate::foreground::watch(tx.clone());
     info!("running; press Ctrl+C to stop");
     let result = daemon::run(p.cfg, &p.config_path, p.pcap, tx, rx, None);
     drop(p.instance);

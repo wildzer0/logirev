@@ -147,6 +147,16 @@ function hidpp.dissector(tvb, pinfo, tree)
       end
       info = "Buttons held: " .. (#held > 0 and table.concat(held, " ") or "none")
     end
+
+    -- Movement while a gesture button is held (raw XY diversion).
+    if fid == 0x1B04 and fn == 1 and sw == 0 and len >= 8 then
+      info = string.format("Gesture movement dx=%d dy=%d", tvb(4, 2):int(), tvb(6, 2):int())
+    end
+
+    -- Battery reports sent by the device on its own.
+    if (fid == 0x1004 or fid == 0x1000) and fn == 0 and sw == 0 and len >= 5 then
+      info = string.format("Battery %d%%", tvb(4, 1):uint())
+    end
   end
 
   if len > 4 then t:add(f.params, tvb(4)) end

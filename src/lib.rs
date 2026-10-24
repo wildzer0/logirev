@@ -17,6 +17,7 @@
 //! | [`app`] | starting the service (config, logs, single instance, Ctrl+C) |
 //! | [`daemon`] | the event loop: connections, profiles, button events, actions |
 //! | [`config`] | reading and validating `logirev.toml` |
+//! | [`foreground`] | which program is in front (per-application buttons) |
 //! | [`hidpp`] | the HID++ protocol: wire format, transport, features, receivers |
 //! | [`input`] | synthetic keyboard/mouse input |
 //! | [`instance`] | single-instance lock |
@@ -29,6 +30,7 @@
 pub mod app;
 pub mod config;
 pub mod daemon;
+pub mod foreground;
 pub mod hidpp;
 pub mod input;
 pub mod instance;

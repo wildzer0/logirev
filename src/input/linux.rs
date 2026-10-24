@@ -10,7 +10,7 @@ use std::mem::size_of;
 use std::os::fd::AsRawFd;
 use std::time::Duration;
 
-use super::keys::KEYS;
+use super::keys::{char_to_key, lookup, KEYS};
 use super::{Injector, Key, MouseButton};
 
 // ioctl request numbers from <linux/uinput.h> (`_IO`/`_IOW` on 'U').
@@ -28,6 +28,7 @@ const EV_REL: u16 = 0x02;
 const SYN_REPORT: u16 = 0;
 const REL_X: u16 = 0x00;
 const REL_Y: u16 = 0x01;
+const REL_HWHEEL: u16 = 0x06;
 const REL_WHEEL: u16 = 0x08;
 const BTN_LEFT: u16 = 0x110;
 const BTN_RIGHT: u16 = 0x111;
@@ -83,7 +84,7 @@ impl Uinput {
         // Relative axes make desktops classify the device as a mouse too, so
         // injected clicks are honoured.
         ioctl(UI_SET_EVBIT, EV_REL.into())?;
-        for axis in [REL_X, REL_Y, REL_WHEEL] {
+        for axis in [REL_X, REL_Y, REL_HWHEEL, REL_WHEEL] {
             ioctl(UI_SET_RELBIT, axis.into())?;
         }
 
@@ -131,6 +132,38 @@ impl Uinput {
 impl Injector for Uinput {
     fn key(&mut self, key: &Key, down: bool) -> io::Result<()> {
         self.press(key.evdev, down)
+    }
+
+    fn scroll(&mut self, vertical: i32, horizontal: i32) -> io::Result<()> {
+        if vertical != 0 {
+            self.emit(EV_REL, REL_WHEEL, vertical)?;
+        }
+        if horizontal != 0 {
+            self.emit(EV_REL, REL_HWHEEL, horizontal)?;
+        }
+        self.emit(EV_SYN, SYN_REPORT, 0)
+    }
+
+    fn text(&mut self, text: &str) -> io::Result<()> {
+        // Characters are typed as US-layout key presses (see `char_to_key`).
+        let shift = lookup("Shift").expect("Shift is in the key table");
+        for c in text.chars() {
+            let Some((key, shifted)) = char_to_key(c) else {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("cannot type '{c}' on Linux (only US keyboard characters)"),
+                ));
+            };
+            if shifted {
+                self.press(shift.evdev, true)?;
+            }
+            self.press(key.evdev, true)?;
+            self.press(key.evdev, false)?;
+            if shifted {
+                self.press(shift.evdev, false)?;
+            }
+        }
+        Ok(())
     }
 
     fn button(&mut self, button: MouseButton, down: bool) -> io::Result<()> {

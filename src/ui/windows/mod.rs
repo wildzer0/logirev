@@ -203,6 +203,7 @@ fn start(p: Prepared, opts: &ServiceOptions) -> Result<(), String> {
             unsafe { PostMessageW(target as HWND, WM_APP_UPDATE, 0, 0) };
         }
     };
+    crate::foreground::watch(tx.clone());
     let (cfg, config_path, pcap) = (p.cfg, p.config_path.clone(), p.pcap);
     let daemon_tx = tx.clone();
     let daemon = std::thread::Builder::new()
