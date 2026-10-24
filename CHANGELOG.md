@@ -3,7 +3,7 @@
 All notable changes are listed here. Versions follow
 [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
+## [1.3.0] — 2026-10-24
 
 ### Added
 - **On-screen messages**: a short message at the bottom of the screen when
