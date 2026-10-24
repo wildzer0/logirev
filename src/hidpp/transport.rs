@@ -39,6 +39,7 @@ use hidapi::{BusType, HidApi, HidDevice};
 use log::{debug, trace, warn};
 
 use super::frame::{Frame, HidppError, RECEIVER_INDEX, REPORT_LONG, REPORT_SHORT};
+use super::traffic::TrafficLog;
 use crate::pcap::{Direction, PcapWriter};
 
 /// Logitech's USB vendor id.
@@ -213,6 +214,8 @@ pub struct Transport {
     stop: Arc<AtomicBool>,
     readers: Vec<JoinHandle<()>>,
     pcap: Option<Arc<Mutex<PcapWriter>>>,
+    /// Recent messages, for the developer mode (off by default).
+    traffic: Arc<TrafficLog>,
     /// How long a request waits for its answer.
     pub timeout: Duration,
 }
@@ -251,6 +254,7 @@ impl Transport {
         let mut writers = Vec::new();
         let mut routes = BTreeMap::new();
         let mut readers = Vec::new();
+        let traffic = Arc::new(TrafficLog::default());
 
         for (path, ids) in &paths {
             let open = |what| {
@@ -267,6 +271,7 @@ impl Transport {
                 tx.clone(),
                 Arc::clone(&stop),
                 pcap.clone(),
+                Arc::clone(&traffic),
                 waker.clone(),
             ));
             debug!("opened {path:?} for report ids {ids:02X?}");
@@ -296,8 +301,14 @@ impl Transport {
             stop,
             readers,
             pcap,
+            traffic,
             timeout: DEFAULT_TIMEOUT,
         })
+    }
+
+    /// The record of recent messages (see [`TrafficLog::set_enabled`]).
+    pub fn traffic(&self) -> &Arc<TrafficLog> {
+        &self.traffic
     }
 
     /// Whether we can send reports with this id.
@@ -315,6 +326,7 @@ impl Transport {
                 HidppError::Io(format!("report {:#04x} not supported", frame.report_id()))
             })?;
         trace!("-> {frame:?}");
+        self.traffic.record(true, frame.as_bytes());
         if let Some(p) = &self.pcap {
             if let Ok(mut p) = p.lock() {
                 let _ = p.write(Direction::Out, frame.device_index(), frame.as_bytes());
@@ -490,6 +502,7 @@ fn spawn_reader(
     tx: Sender<Incoming>,
     stop: Arc<AtomicBool>,
     pcap: Option<Arc<Mutex<PcapWriter>>>,
+    traffic: Arc<TrafficLog>,
     waker: Option<Waker>,
 ) -> JoinHandle<()> {
     let wake = move || {
@@ -509,6 +522,7 @@ fn spawn_reader(
                             continue;
                         };
                         trace!("<- {frame:?}");
+                        traffic.record(false, frame.as_bytes());
                         if let Some(p) = &pcap {
                             if let Ok(mut p) = p.lock() {
                                 let _ =

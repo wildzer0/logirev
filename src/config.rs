@@ -86,6 +86,9 @@ pub struct General {
     pub theme: String,
     /// Look for a newer version on GitHub (once a day).
     pub check_updates: bool,
+    /// Developer mode: technical details and live HID++ messages in the
+    /// settings window.
+    pub developer: bool,
 }
 
 impl Default for General {
@@ -96,6 +99,7 @@ impl Default for General {
             language: "auto".into(),
             theme: "system".into(),
             check_updates: true,
+            developer: false,
         }
     }
 }

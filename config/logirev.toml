@@ -26,6 +26,10 @@ battery_warning = 15
 # Look for a new version of logirev on GitHub once a day (true / false).
 check_updates = true
 
+# Developer mode: a "Technical" tab in the settings window with the device's
+# identity, firmware components, every feature and the live HID++ messages.
+developer = false
+
 # -----------------------------------------------------------------------------
 #  Logging
 # -----------------------------------------------------------------------------

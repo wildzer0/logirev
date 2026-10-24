@@ -5,6 +5,16 @@ All notable changes are listed here. Versions follow
 
 ## [Unreleased]
 
+### Added
+- **Developer mode** (*Settings → Developer mode*): a *Technical* tab on
+  every device with its identity (serial number, unit and model ids),
+  firmware components, every feature with its version and type (hidden,
+  engineering...), the live HID++ messages, and *Copy / Save report*.
+  Read-only; the service records messages only while it is on.
+- `logirevctl scan` shows each feature's version and type;
+  `logirevctl scan --hidden` also shows identity and firmware components
+  and lists the features Logitech keeps hidden (without using them).
+
 ### Changed
 - **Button editor**: ready-made actions (Back, Copy, Paste, Task view,
   Play / Pause, Volume...) are applied with one click; the other actions

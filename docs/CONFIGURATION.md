@@ -56,6 +56,7 @@ match = { kind = "mouse" }
 |---|---|---|
 | `product_id` | `"auto"` uses every Logitech receiver and device found. Write a USB product id (e.g. `"c548"` = Bolt, `"c52b"` = Unifying) to use only that kind. | `"auto"` |
 | `check_updates` | look for a new version on GitHub once a day (`true` / `false`) | `true` |
+| `developer` | developer mode: a *Technical* tab on every device (identity, firmware components, features, live HID++ messages) (`true` / `false`) | `false` |
 | `language` | settings window language: `"auto"`, `"en"`, `"it"` | `"auto"` |
 | `theme` | settings window look: `"system"`, `"light"`, `"dark"` | `"system"` |
 | `battery_warning` | show a notification when a battery drops to this percentage; `0` = never. You are warned once, and again only after charging. | `15` |

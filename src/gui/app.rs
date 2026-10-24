@@ -20,13 +20,14 @@ use eframe::egui::{
 
 use super::form::{dpi_slider, ActionForm, FormContext};
 use super::i18n::{control_label, fill, Lang, T};
-use super::style::{self, icon, palette, ACCENT, BAD, GOOD};
+use super::style::{self, icon, palette, ACCENT, BAD, GOOD, WARN};
 use crate::config::{
     BacklightMode, Match, RawAction, RawApp, RawBacklight, RawConfig, RawMacro, RawProfile,
     RawSmartShift, RawStep, SmartShiftMode,
 };
-use crate::hidpp::features::{DeviceKind, DISABLE_KEY_NAMES};
+use crate::hidpp::features::{feature_name, DeviceKind, DISABLE_KEY_NAMES};
 use crate::hidpp::frame::RECEIVER_INDEX;
+use crate::hidpp::traffic::TrafficEntry;
 use crate::input::keys::MouseButton;
 use crate::ipc::{Client, ToService};
 use crate::status::{DeviceStatus, LinkStatus, Snapshot};
@@ -64,6 +65,7 @@ enum Tab {
     Keyboard,
     Programs,
     Computers,
+    Technical,
 }
 
 /// Progress of the update check / installation (shared with the worker
@@ -114,6 +116,12 @@ pub struct SettingsApp {
     editor: Option<Editor>,
     /// The button row under the mouse (drawn highlighted next frame).
     hovered_row: Option<u16>,
+    /// Developer mode: messages frozen by "Pause".
+    traffic_paused: Option<Vec<TrafficEntry>>,
+    /// Developer mode: show only the messages of the open device.
+    traffic_only_device: bool,
+    /// Developer mode: when the report was copied.
+    report_copied: Option<Instant>,
     new_program: String,
     running_programs: Vec<String>,
     logo: Option<TextureHandle>,
@@ -165,6 +173,9 @@ impl SettingsApp {
             tab: Tab::Buttons,
             editor: None,
             hovered_row: None,
+            traffic_paused: None,
+            traffic_only_device: true,
+            report_copied: None,
             new_program: String::new(),
             running_programs: Vec::new(),
             logo: None,
@@ -180,10 +191,12 @@ impl SettingsApp {
         if app.demo {
             app.snapshot = demo_snapshot();
             app.page = match std::env::var("LOGIREV_PAGE").as_deref() {
-                Ok("device") | Ok("pointer") | Ok("computers") | Ok("editor") => Page::Device {
-                    link: "demo".into(),
-                    slot: 2,
-                },
+                Ok("device") | Ok("pointer") | Ok("computers") | Ok("editor") | Ok("technical") => {
+                    Page::Device {
+                        link: "demo".into(),
+                        slot: 2,
+                    }
+                }
                 Ok("macros") => Page::Macros,
                 Ok("settings") => Page::Settings,
                 Ok("about") => Page::About,
@@ -192,6 +205,7 @@ impl SettingsApp {
             app.tab = match std::env::var("LOGIREV_PAGE").as_deref() {
                 Ok("pointer") => Tab::Pointer,
                 Ok("computers") => Tab::Computers,
+                Ok("technical") => Tab::Technical,
                 _ => Tab::Buttons,
             };
             if std::env::var("LOGIREV_PAGE").as_deref() == Ok("editor") {
@@ -946,6 +960,9 @@ impl SettingsApp {
         if computers {
             tabs.push((Tab::Computers, icon::DESKTOP, t.tab_computers));
         }
+        if self.raw.general.developer {
+            tabs.push((Tab::Technical, icon::CODE, t.tab_tech));
+        }
         if !tabs.iter().any(|(tab, ..)| *tab == self.tab) {
             if let Some((first, ..)) = tabs.first() {
                 self.tab = *first;
@@ -988,6 +1005,7 @@ impl SettingsApp {
             Tab::Keyboard => self.keyboard_tab(ui, &d, kind),
             Tab::Programs => self.programs_tab(ui, &d, kind),
             Tab::Computers => self.computers_tab(ui, link, &d),
+            Tab::Technical => self.technical_tab(ui, link, &d),
         }
     }
 
@@ -1073,6 +1091,232 @@ impl SettingsApp {
             }
         }
         self.hovered_row = hovered;
+    }
+
+    /// Developer mode: everything the device says about itself, and the
+    /// latest HID++ messages.
+    fn technical_tab(&mut self, ui: &mut Ui, link: &str, d: &DeviceStatus) {
+        let t = self.t;
+        let pal = palette(ui.visuals().dark_mode);
+        let mono = |text: String| RichText::new(text).monospace();
+        ui.label(RichText::new(t.tech_hint).color(pal.muted));
+        ui.add_space(6.0);
+        let Some(tech) = d.details.as_ref().and_then(|x| x.tech.clone()) else {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(t.tech_loading);
+            });
+            return;
+        };
+        let link_status = self.snapshot.links.iter().find(|l| l.key == link).cloned();
+
+        // Report: copy / save.
+        let report = || {
+            serde_json::to_string_pretty(&serde_json::json!({
+                "logirev": env!("CARGO_PKG_VERSION"),
+                "receiver": link_status.as_ref().map(|l| l.name.clone()),
+                "device": d,
+                "traffic": link_status.as_ref().map(|l| {
+                    l.traffic.iter().map(|e| format!(
+                        "{} {}", if e.outgoing { "->" } else { "<-" }, hex_bytes(&e.bytes)
+                    )).collect::<Vec<_>>()
+                }),
+            }))
+            .unwrap_or_default()
+        };
+        ui.horizontal(|ui| {
+            if ui
+                .button(format!("{} {}", icon::CLIPBOARD_TEXT, t.tech_copy))
+                .clicked()
+            {
+                ui.ctx().copy_text(report());
+                self.report_copied = Some(Instant::now());
+            }
+            #[cfg(windows)]
+            if ui
+                .button(format!("{} {}", icon::FLOPPY_DISK, t.tech_save))
+                .clicked()
+            {
+                if let Some(path) = rfd::FileDialog::new()
+                    .set_file_name(format!("logirev-{}.json", d.name.replace(' ', "-")))
+                    .add_filter("JSON", &["json"])
+                    .save_file()
+                {
+                    let _ = std::fs::write(path, report());
+                }
+            }
+            if self
+                .report_copied
+                .is_some_and(|at| at.elapsed() < Duration::from_secs(3))
+            {
+                ui.label(RichText::new(format!("{} {}", icon::CHECK, t.tech_copied)).color(GOOD));
+                ui.ctx().request_repaint_after(Duration::from_secs(1));
+            }
+        });
+        ui.add_space(8.0);
+
+        section(
+            ui,
+            pal.card,
+            pal.border,
+            &format!("{}  {}", icon::INFO, t.tech_identity),
+            |ui| {
+                egui::Grid::new("tech-identity")
+                    .num_columns(2)
+                    .spacing([24.0, 6.0])
+                    .show(ui, |ui| {
+                        let mut row = |k: &str, v: String| {
+                            ui.label(RichText::new(k).color(pal.muted));
+                            ui.label(mono(v));
+                            ui.end_row();
+                        };
+                        row(
+                            t.tech_serial,
+                            tech.serial.clone().unwrap_or_else(|| "—".into()),
+                        );
+                        row(t.tech_unit_id, or_dash(&tech.unit_id));
+                        row(t.tech_model_ids, or_dash(&tech.model_ids.join(", ")));
+                        row(t.tech_transports, or_dash(&tech.transports.join(", ")));
+                        if let Some(l) = &link_status {
+                            row(t.tech_receiver, l.name.clone());
+                        }
+                        row(t.tech_slot, d.slot.to_string());
+                    });
+            },
+        );
+
+        section(
+            ui,
+            pal.card,
+            pal.border,
+            &format!("{}  {}", icon::CPU, t.tech_firmware),
+            |ui| {
+                egui::Grid::new("tech-firmware")
+                    .num_columns(3)
+                    .spacing([24.0, 6.0])
+                    .show(ui, |ui| {
+                        for f in &tech.firmware {
+                            ui.label(RichText::new(&f.kind).color(pal.muted));
+                            ui.label(mono(or_dash(&f.version)));
+                            let mut extra =
+                                f.pid.map(|p| format!("PID {p:04X}")).unwrap_or_default();
+                            if f.active {
+                                extra =
+                                    format!("{extra}  {} {}", icon::CHECK_CIRCLE, t.tech_running);
+                            }
+                            ui.label(RichText::new(extra.trim()).small().color(pal.muted));
+                            ui.end_row();
+                        }
+                    });
+            },
+        );
+
+        let title = fill(t.tech_features, &[&tech.features.len().to_string()]);
+        section(
+            ui,
+            pal.card,
+            pal.border,
+            &format!("{}  {title}", icon::SLIDERS),
+            |ui| {
+                ui.label(RichText::new(t.tech_features_hint).small().color(pal.muted));
+                ui.add_space(4.0);
+                egui::Grid::new("tech-features")
+                    .num_columns(4)
+                    .striped(true)
+                    .spacing([18.0, 4.0])
+                    .show(ui, |ui| {
+                        for f in &tech.features {
+                            ui.label(mono(format!("{:>2}", f.index)).color(pal.muted));
+                            ui.label(mono(format!("{:#06X}", f.id).replace("0X", "0x")));
+                            ui.label(format!("{}  v{}", feature_name(f.id), f.version));
+                            ui.horizontal(|ui| {
+                                for flag in f.flag_names() {
+                                    let color = if flag == "obsolete" { pal.muted } else { WARN };
+                                    ui.label(RichText::new(flag).small().color(color));
+                                }
+                            });
+                            ui.end_row();
+                        }
+                    });
+            },
+        );
+
+        section(
+            ui,
+            pal.card,
+            pal.border,
+            &format!("{}  {}", icon::CODE, t.tech_traffic),
+            |ui| {
+                ui.label(
+                    RichText::new(fill(
+                        t.tech_traffic_hint,
+                        &[icon::ARROW_RIGHT, icon::ARROW_LEFT],
+                    ))
+                    .small()
+                    .color(pal.muted),
+                );
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut self.traffic_only_device, t.tech_only_device);
+                    let paused = self.traffic_paused.is_some();
+                    let label = if paused {
+                        format!("{} {}", icon::PLAY, t.tech_resume)
+                    } else {
+                        format!("{} {}", icon::PAUSE, t.tech_pause)
+                    };
+                    if ui.button(label).clicked() {
+                        self.traffic_paused = if paused {
+                            None
+                        } else {
+                            Some(
+                                link_status
+                                    .as_ref()
+                                    .map(|l| l.traffic.clone())
+                                    .unwrap_or_default(),
+                            )
+                        };
+                    }
+                });
+                let live = link_status
+                    .as_ref()
+                    .map(|l| l.traffic.clone())
+                    .unwrap_or_default();
+                let entries = self.traffic_paused.clone().unwrap_or(live);
+                let shown: Vec<&TrafficEntry> = entries
+                    .iter()
+                    .filter(|e| !self.traffic_only_device || e.bytes.get(1) == Some(&d.slot))
+                    .collect();
+                if shown.is_empty() {
+                    ui.label(RichText::new(t.tech_no_traffic).color(pal.muted));
+                    return;
+                }
+                ScrollArea::vertical()
+                    .id_salt("tech-traffic")
+                    .max_height(320.0)
+                    .stick_to_bottom(true)
+                    .show(ui, |ui| {
+                        let mut previous: Option<u64> = None;
+                        for e in shown {
+                            let gap = previous.map_or(0, |p| e.time_ms.saturating_sub(p));
+                            previous = Some(e.time_ms);
+                            let (arrow, color) = if e.outgoing {
+                                ("→", ACCENT)
+                            } else {
+                                ("←", GOOD)
+                            };
+                            ui.horizontal(|ui| {
+                                ui.label(mono(format!("+{:>5} ms", gap)).small().color(pal.muted));
+                                ui.label(RichText::new(arrow).color(color));
+                                ui.label(mono(hex_bytes(&e.bytes)).small());
+                                ui.label(
+                                    RichText::new(describe_frame(&e.bytes, &tech.features))
+                                        .small()
+                                        .color(pal.muted),
+                                );
+                            });
+                        }
+                    });
+            },
+        );
     }
 
     fn pointer_tab(&mut self, ui: &mut Ui, d: &DeviceStatus, kind: DeviceKind) {
@@ -1939,6 +2183,17 @@ impl SettingsApp {
             ui,
             pal.card,
             pal.border,
+            &format!("{}  {}", icon::CODE, t.developer),
+            |ui| {
+                ui.checkbox(&mut self.raw.general.developer, t.developer_on);
+                ui.label(RichText::new(t.developer_hint).small().color(pal.muted));
+            },
+        );
+
+        section(
+            ui,
+            pal.card,
+            pal.border,
             &format!("{}  {}", icon::FILE_TEXT, t.files),
             |ui| {
                 ui.horizontal(|ui| {
@@ -2447,6 +2702,7 @@ fn demo_snapshot() -> Snapshot {
             ),
         ],
         dpi_values: (400..=4000).step_by(50).collect(),
+        tech: Some(demo_tech()),
         ..Default::default()
     };
     let device = |slot: u8,
@@ -2477,6 +2733,7 @@ fn demo_snapshot() -> Snapshot {
             is_receiver: true,
             can_pair: true,
             pairing: None,
+            traffic: demo_traffic(),
             devices: vec![
                 device(1, "Wave Keys", "keyboard", false, None, None),
                 device(2, "MX Ergo S", "trackball", true, Some("30%"), Some(ergo)),
@@ -2602,6 +2859,125 @@ fn running_programs() -> Vec<String> {
     Vec::new()
 }
 
+/// Technical details shown by the demo (developer mode).
+fn demo_tech() -> crate::hidpp::diagnostics::TechInfo {
+    use crate::hidpp::diagnostics::{FirmwareEntity, TechInfo};
+    use crate::hidpp::features::FeatureEntry;
+    let f = |id: u16, index: u8, version: u8, flags: u8| FeatureEntry {
+        id,
+        index,
+        version,
+        flags,
+    };
+    TechInfo {
+        unit_id: "1A2B3C4D".into(),
+        serial: Some("2412LZ0ABC12".into()),
+        model_ids: vec!["BLE B03F".into(), "eQuad B03E".into()],
+        transports: vec!["BLE".into(), "eQuad".into()],
+        firmware: vec![
+            FirmwareEntity {
+                kind: "application".into(),
+                version: "RBM 26.01.B0013".into(),
+                pid: Some(0xB03E),
+                active: true,
+            },
+            FirmwareEntity {
+                kind: "bootloader".into(),
+                version: "BL1 46.00.B0008".into(),
+                pid: Some(0xB03E),
+                active: false,
+            },
+            FirmwareEntity {
+                kind: "hardware".into(),
+                version: String::new(),
+                pid: None,
+                active: false,
+            },
+        ],
+        features: vec![
+            f(0x0000, 0, 2, 0),
+            f(0x0001, 1, 1, 0),
+            f(0x0003, 2, 4, 0),
+            f(0x0005, 3, 0, 0),
+            f(0x1004, 4, 3, 0),
+            f(0x1B04, 5, 5, 0),
+            f(0x2201, 6, 2, 0),
+            f(0x1814, 7, 1, 0),
+            f(0x1815, 8, 1, 0),
+            f(0x1D4B, 9, 0, 0),
+            f(0x00C3, 10, 0, 0),
+            f(0x1802, 11, 0, 0x60),
+            f(0x1E00, 12, 0, 0x40),
+            f(0x1EB0, 13, 0, 0x60),
+        ],
+    }
+}
+
+/// HID++ messages shown by the demo (developer mode).
+fn demo_traffic() -> Vec<crate::hidpp::traffic::TrafficEntry> {
+    let frames: [(bool, &[u8]); 6] = [
+        (true, &[0x10, 0x02, 0x00, 0x1A, 0x22, 0x01, 0x00]),
+        (false, &[0x11, 0x02, 0x00, 0x1A, 0x06, 0x00, 0x02]),
+        (true, &[0x10, 0x02, 0x06, 0x2A, 0x00, 0x00, 0x00]),
+        (false, &[0x11, 0x02, 0x06, 0x2A, 0x00, 0x02, 0xEE]),
+        (false, &[0x11, 0x02, 0x05, 0x00, 0x00, 0x53]),
+        (false, &[0x11, 0x02, 0x05, 0x00, 0x00, 0x00]),
+    ];
+    frames
+        .iter()
+        .enumerate()
+        .map(|(i, (outgoing, b))| crate::hidpp::traffic::TrafficEntry {
+            seq: i as u64 + 1,
+            time_ms: 1_761_300_000_000 + i as u64 * 37,
+            outgoing: *outgoing,
+            bytes: b.to_vec(),
+        })
+        .collect()
+}
+
+/// Bytes as `10 02 00 1A ...`, trailing zero padding removed.
+fn hex_bytes(bytes: &[u8]) -> String {
+    let end = bytes
+        .iter()
+        .rposition(|&b| b != 0)
+        .map_or(4, |i| (i + 1).max(4));
+    bytes[..end.min(bytes.len())]
+        .iter()
+        .map(|b| format!("{b:02X}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// A short explanation of a HID++ message: feature name and function.
+fn describe_frame(bytes: &[u8], features: &[crate::hidpp::features::FeatureEntry]) -> String {
+    let (Some(&slot), Some(&b2), Some(&b3)) = (bytes.get(1), bytes.get(2), bytes.get(3)) else {
+        return String::new();
+    };
+    match b2 {
+        0xFF => return "error".into(),
+        0x8F => return "HID++ 1.0 error".into(),
+        0x80..=0x83 => return format!("register {b3:#04x}"),
+        0x41 => return "device connection".into(),
+        _ if slot == 0xFF || b2 >= 0x40 => return format!("receiver {b2:#04x}"),
+        _ => {}
+    }
+    match features.iter().find(|f| f.index == b2) {
+        Some(f) => {
+            let kind = if b3 & 0x0F == 0 { "event" } else { "call" };
+            format!("{} fn {} {kind}", feature_name(f.id), b3 >> 4)
+        }
+        None => String::new(),
+    }
+}
+
+fn or_dash(s: &str) -> String {
+    if s.is_empty() {
+        "—".into()
+    } else {
+        s.to_owned()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2629,5 +3005,33 @@ mod tests {
         assert_eq!(kind_of("trackball"), DeviceKind::Trackball);
         assert_eq!(kind_of("weird"), DeviceKind::Other);
         let _ = Config::parse("", Path::new(".")).unwrap();
+    }
+
+    #[test]
+    fn describes_frames() {
+        use crate::hidpp::features::FeatureEntry;
+        let f = [FeatureEntry {
+            id: 0x2201,
+            index: 6,
+            version: 2,
+            flags: 0,
+        }];
+        assert_eq!(hex_bytes(&[0x10, 0x02, 0x06, 0x2A, 0, 0, 0]), "10 02 06 2A");
+        assert_eq!(
+            describe_frame(&[0x10, 0x02, 0x06, 0x2A], &f),
+            "AdjustableDpi fn 2 call"
+        );
+        assert_eq!(
+            describe_frame(&[0x11, 0x02, 0x06, 0x00], &f),
+            "AdjustableDpi fn 0 event"
+        );
+        assert_eq!(
+            describe_frame(&[0x10, 0x02, 0x41, 0x04], &f),
+            "device connection"
+        );
+        assert_eq!(
+            describe_frame(&[0x10, 0xFF, 0x81, 0x02], &f),
+            "register 0x02"
+        );
     }
 }

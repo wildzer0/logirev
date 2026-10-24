@@ -44,6 +44,7 @@ use crate::config::{
     self, Action, BacklightChange, BacklightMode, Config, Gesture, HostTarget, Macro, Profile,
     SlowMode, Step,
 };
+use crate::hidpp::diagnostics;
 use crate::hidpp::features::{
     control_name, id, BacklightState, Battery, Control, Device, DeviceKind, FeatureTable,
     DISABLE_KEY_NAMES,
@@ -87,6 +88,9 @@ const RESCAN_WHILE_CONNECTED: Duration = Duration::from_secs(15);
 /// announces each HID collection separately and they need a moment to be
 /// ready, so several announcements are served by one rescan.
 const RESCAN_DEBOUNCE: Duration = Duration::from_millis(500);
+/// Developer mode: send recent HID++ messages to the window at most this
+/// often.
+const TRAFFIC_EVERY: Duration = Duration::from_millis(400);
 
 /// Something the event loop must react to.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -180,6 +184,9 @@ pub fn run(
         hooks,
         dirty: true,
         app: None,
+        traffic_seen: 0,
+        traffic_sent: Instant::now(),
+        traffic_due: None,
     };
     daemon.rescan();
     daemon.publish();
@@ -210,6 +217,11 @@ struct Daemon {
     dirty: bool,
     /// Program in the foreground (normalised name), if known.
     app: Option<String>,
+    /// Developer mode: number of the last message sent to the interface,
+    /// when, and when the next batch is due.
+    traffic_seen: u64,
+    traffic_sent: Instant,
+    traffic_due: Option<Instant>,
 }
 
 /// What a [`Link`] needs from the daemon while handling events.
@@ -322,6 +334,7 @@ impl Daemon {
             })
             .chain(std::iter::once(self.next_housekeeping))
             .chain(self.rescan_due)
+            .chain(self.traffic_due)
             .min()
             .unwrap_or(self.next_housekeeping)
     }
@@ -408,6 +421,7 @@ impl Daemon {
         self.cfg = new;
         let mut ctx = ctx!(self);
         for link in &mut self.links {
+            link.t.traffic().set_enabled(ctx.cfg.general.developer);
             link.apply_new_config(&mut ctx);
         }
         self.dirty = true;
@@ -416,6 +430,19 @@ impl Daemon {
 
     /// Sends a snapshot to the interface if anything changed.
     fn publish(&mut self) {
+        if self.cfg.general.developer {
+            let seq: u64 = self.links.iter().map(|l| l.t.traffic().last_seq()).sum();
+            if seq != self.traffic_seen {
+                if self.traffic_sent.elapsed() >= TRAFFIC_EVERY {
+                    self.traffic_seen = seq;
+                    self.traffic_sent = Instant::now();
+                    self.traffic_due = None;
+                    self.dirty = true;
+                } else {
+                    self.traffic_due = Some(self.traffic_sent + TRAFFIC_EVERY);
+                }
+            }
+        }
         let changed = self.dirty || self.links.iter().any(|l| l.changed);
         if !changed {
             return;
@@ -472,6 +499,7 @@ impl Daemon {
                 Ok(t) => {
                     self.failed.remove(&key);
                     info!("using {}", t.name);
+                    t.traffic().set_enabled(self.cfg.general.developer);
                     let mut link = Link::new(key, t);
                     link.start();
                     self.links.push(link);
@@ -657,6 +685,11 @@ impl Link {
                 stage: p.stage.clone(),
                 found: p.found.clone(),
             }),
+            traffic: if cfg.general.developer {
+                self.t.traffic().recent()
+            } else {
+                Vec::new()
+            },
         }
     }
 
@@ -1283,6 +1316,9 @@ impl Link {
 
         info!("slot {slot}: \"{name}\" ({kind}) connected{battery_text}");
         apply_profile(&mut dev, cfg, app, slot, &mut session);
+        if cfg.general.developer {
+            session.details.tech = Some(diagnostics::read(t, slot, &features));
+        }
         Ok(session)
     }
 
@@ -1356,6 +1392,11 @@ impl Link {
             s.gesture = None;
             s.repeat = None;
             apply_profile(&mut dev, ctx.cfg, ctx.app, *slot, s);
+            if !ctx.cfg.general.developer {
+                s.details.tech = None;
+            } else if s.details.tech.is_none() {
+                s.details.tech = Some(diagnostics::read(&mut self.t, *slot, &features));
+            }
         }
         self.changed = true;
     }
@@ -1749,6 +1790,7 @@ fn collect_details(
         },
         backlight_levels: backlight.map(|_| dev.backlight_levels().unwrap_or(1).max(1)),
         backlight_auto: backlight.is_some_and(|b| b.supports_auto()),
+        tech: None,
     }
 }
 

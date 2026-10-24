@@ -181,6 +181,11 @@ advanced diagnostics there is `logirevctl.exe`, a command-line tool:
 `logirevctl run --log-level debug --pcap logirev.pcap` records the traffic
 for Wireshark (quit logirev first).
 
+**Developer mode** (*Settings → Developer mode*) adds a *Technical* tab to
+each device: serial number, firmware components, every feature (including
+the ones Logitech keeps hidden) and the HID++ messages as they happen, with
+a *Copy report* button for bug reports. Everything there is read-only.
+
 ---
 
 ## Linux

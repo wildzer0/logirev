@@ -1,7 +1,8 @@
 //! `logirevctl` — command-line tools for logirev.
 //!
 //! * `scan` — show every receiver, its paired slots and, for connected
-//!   devices, their features, settings and remappable buttons;
+//!   devices, their features, settings and remappable buttons
+//!   (`--hidden`: also identity, firmware components and hidden features);
 //! * `list` — show the raw HID++ interfaces found on the system;
 //! * `init` — write a commented default configuration file;
 //! * `run` — run the service in this terminal (same as `logirev`);
@@ -17,6 +18,7 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use hidapi::HidApi;
 use log::{error, LevelFilter};
+use logirev::hidpp::diagnostics;
 
 use logirev::app::{self, ServiceOptions};
 use logirev::config::{self, Config};
@@ -57,7 +59,12 @@ struct Cli {
 #[derive(Subcommand)]
 enum Cmd {
     /// Show receivers, paired devices, settings and remappable buttons
-    Scan,
+    Scan {
+        /// Also show identity and firmware components, and list the
+        /// features Logitech keeps hidden (they are listed, never used)
+        #[arg(long)]
+        hidden: bool,
+    },
     /// List the HID++ interfaces visible to the system
     List,
     /// Create a commented configuration file
@@ -90,7 +97,9 @@ fn main() -> ExitCode {
             background: true,
             after_update: false,
         }),
-        Cmd::Scan => console_logging(&cli).and_then(|()| cmd_scan(&cli, &config_path)),
+        Cmd::Scan { hidden } => {
+            console_logging(&cli).and_then(|()| cmd_scan(&cli, &config_path, *hidden))
+        }
         Cmd::List => console_logging(&cli).and_then(|()| cmd_list()),
         Cmd::Init { force } => cmd_init(&config_path, *force),
         Cmd::InstallService => cmd_install_service(&config_path),
@@ -298,7 +307,7 @@ fn cmd_list() -> Result<(), String> {
     Ok(())
 }
 
-fn cmd_scan(cli: &Cli, config_path: &Path) -> Result<(), String> {
+fn cmd_scan(cli: &Cli, config_path: &Path, hidden: bool) -> Result<(), String> {
     // The configuration is optional here: it is only used to show which
     // profile each device would get.
     let cfg = Config::load(config_path).ok();
@@ -325,7 +334,7 @@ fn cmd_scan(cli: &Cli, config_path: &Path) -> Result<(), String> {
             let paired = paired_devices(&mut t);
             for slot in 1..=MAX_SLOTS {
                 if t.ping(slot).is_some() {
-                    scan_device(&mut t, slot, cfg.as_ref());
+                    scan_device(&mut t, slot, cfg.as_ref(), hidden);
                 } else if let Some(p) = paired.iter().find(|p| p.slot == slot) {
                     let name = p.name.as_deref().unwrap_or("unnamed device");
                     println!(
@@ -338,7 +347,7 @@ fn cmd_scan(cli: &Cli, config_path: &Path) -> Result<(), String> {
                 println!("  (the list of paired-but-sleeping devices is not available for this receiver)");
             }
         } else {
-            scan_device(&mut t, RECEIVER_INDEX, cfg.as_ref());
+            scan_device(&mut t, RECEIVER_INDEX, cfg.as_ref(), hidden);
         }
     }
     println!(
@@ -348,7 +357,7 @@ fn cmd_scan(cli: &Cli, config_path: &Path) -> Result<(), String> {
 }
 
 /// Prints everything readable about the device at `slot`.
-fn scan_device(t: &mut Transport, slot: u8, cfg: Option<&Config>) {
+fn scan_device(t: &mut Transport, slot: u8, cfg: Option<&Config>, hidden: bool) {
     let Some((major, minor)) = t.ping(slot) else {
         return;
     };
@@ -470,9 +479,16 @@ fn scan_device(t: &mut Transport, slot: u8, cfg: Option<&Config>) {
         );
     }
 
-    println!("  features:");
-    for (fid, index) in features.iter() {
-        println!("    {index:>3}  {fid:#06x}  {}", feature_name(fid));
+    println!("  features (index, id, name, version, flags):");
+    for f in features.entries() {
+        println!(
+            "    {:>3}  {:#06x}  {:<28} v{:<3} {}",
+            f.index,
+            f.id,
+            feature_name(f.id),
+            f.version,
+            f.flag_names().join(", ")
+        );
     }
     if features.has(id::REPROG_CONTROLS_V4) {
         println!("  buttons (config name, id, remappable, default task):");
@@ -506,6 +522,53 @@ fn scan_device(t: &mut Transport, slot: u8, cfg: Option<&Config>) {
             }
             Err(e) => println!("    cannot list buttons: {e}"),
         }
+    }
+    if hidden {
+        scan_technical(t, slot, &features);
+    }
+}
+
+/// `scan --hidden`: identity, firmware components and hidden features.
+fn scan_technical(t: &mut Transport, slot: u8, features: &FeatureTable) {
+    let tech = diagnostics::read(t, slot, features);
+    println!("  identity:");
+    println!(
+        "    serial         {}",
+        tech.serial.as_deref().unwrap_or("-")
+    );
+    println!("    unit id        {}", tech.unit_id);
+    println!("    model ids      {}", tech.model_ids.join(", "));
+    println!("    connections    {}", tech.transports.join(", "));
+    println!("  firmware components:");
+    for f in &tech.firmware {
+        println!(
+            "    {:<20} {:<18} {}{}",
+            f.kind,
+            f.version,
+            f.pid.map(|p| format!("pid {p:04x}")).unwrap_or_default(),
+            if f.active { "  (running)" } else { "" }
+        );
+    }
+    if !features.has(id::ENABLE_HIDDEN_FEATURES) {
+        println!("  hidden features: the device has no EnableHiddenFeatures (0x1e00)");
+        return;
+    }
+    println!("  hidden features (unlocked for a moment, then locked again):");
+    match diagnostics::list_hidden_features(t, slot, features) {
+        Ok(list) if list.is_empty() => println!("    none beyond the list above"),
+        Ok(list) => {
+            for f in list {
+                println!(
+                    "    {:>3}  {:#06x}  {:<28} v{:<3} {}",
+                    f.index,
+                    f.id,
+                    feature_name(f.id),
+                    f.version,
+                    f.flag_names().join(", ")
+                );
+            }
+        }
+        Err(e) => println!("    cannot read them: {e}"),
     }
 }
 

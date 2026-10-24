@@ -302,6 +302,7 @@ mod tests {
         };
         Snapshot {
             links: vec![LinkStatus {
+                traffic: Vec::new(),
                 key: "bolt".into(),
                 name: "Bolt receiver (046d:c548)".into(),
                 is_receiver: true,

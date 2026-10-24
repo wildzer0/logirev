@@ -33,6 +33,9 @@ pub struct LinkStatus {
     /// A pairing session in progress or just finished.
     #[serde(default)]
     pub pairing: Option<PairingStatus>,
+    /// Recent HID++ messages (developer mode only, otherwise empty).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub traffic: Vec<crate::hidpp::traffic::TrafficEntry>,
 }
 
 /// State of a pairing session, for the settings window.
@@ -100,6 +103,9 @@ pub struct DeviceDetails {
     pub backlight_levels: Option<u8>,
     /// The backlight can follow the room light.
     pub backlight_auto: bool,
+    /// Identity, firmware components and features (developer mode only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tech: Option<crate::hidpp::diagnostics::TechInfo>,
 }
 
 /// One button of a device.
@@ -215,6 +221,7 @@ mod tests {
         assert_eq!(Snapshot::default().tooltip(), "logirev — no receiver");
         let snap = Snapshot {
             links: vec![LinkStatus {
+                traffic: Vec::new(),
                 key: "k".into(),
                 name: "Bolt".into(),
                 is_receiver: true,
@@ -229,6 +236,7 @@ mod tests {
         assert_eq!(snap.tooltip(), "logirev — MX Ergo S 30%");
         let long = Snapshot {
             links: vec![LinkStatus {
+                traffic: Vec::new(),
                 key: "k".into(),
                 name: "x".into(),
                 is_receiver: true,

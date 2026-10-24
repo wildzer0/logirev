@@ -238,6 +238,37 @@ texts! {
     act_gesture => "Gestures (hold and move)", "Gesture (tieni premuto e muovi)";
     act_custom => "Custom (set in the file)", "Personalizzata (nel file)";
     current_action => "Now: {}", "Ora: {}";
+    tab_tech => "Technical", "Tecnico";
+    developer => "Developer mode", "Modalità sviluppatore";
+    developer_on => "Show technical details", "Mostra i dettagli tecnici";
+    developer_hint => "Adds a \"Technical\" tab to each device: identity, firmware components, every feature (hidden ones included) and the live HID++ messages. Everything is read-only.",
+        "Aggiunge a ogni periferica una scheda \"Tecnico\": identità, componenti del firmware, tutte le funzioni (anche quelle nascoste) e i messaggi HID++ in tempo reale. È tutto in sola lettura.";
+    tech_hint => "Read-only information reported by the device. Useful for bug reports.",
+        "Informazioni in sola lettura fornite dalla periferica. Utili per segnalare un problema.";
+    tech_loading => "Reading the technical details...", "Lettura dei dettagli tecnici...";
+    tech_identity => "Identity", "Identità";
+    tech_serial => "Serial number", "Numero di serie";
+    tech_unit_id => "Unit id", "ID dell'unità";
+    tech_model_ids => "Model ids", "ID del modello";
+    tech_transports => "Connections", "Connessioni";
+    tech_slot => "Receiver slot", "Slot del ricevitore";
+    tech_receiver => "Receiver", "Ricevitore";
+    tech_firmware => "Firmware components", "Componenti del firmware";
+    tech_running => "running", "in esecuzione";
+    tech_features => "Features ({})", "Funzioni ({})";
+    tech_features_hint => "\"hidden\" and \"engineering\" features are meant for Logitech's own tools: logirev only lists them.",
+        "Le funzioni \"hidden\" e \"engineering\" sono per gli strumenti di Logitech: logirev si limita a elencarle.";
+    tech_traffic => "HID++ messages", "Messaggi HID++";
+    tech_traffic_hint => "The latest messages between logirev and the receiver. {} sent, {} received.",
+        "Gli ultimi messaggi tra logirev e il ricevitore. {} inviati, {} ricevuti.";
+    tech_only_device => "Only this device", "Solo questa periferica";
+    tech_pause => "Pause", "Pausa";
+    tech_resume => "Resume", "Riprendi";
+    tech_no_traffic => "No messages yet: press a remapped button or change a setting.",
+        "Ancora nessun messaggio: premi un tasto riassegnato o cambia un'impostazione.";
+    tech_copy => "Copy report", "Copia rapporto";
+    tech_save => "Save report...", "Salva rapporto...";
+    tech_copied => "Copied to the clipboard", "Copiato negli appunti";
     reset_default => "Restore default", "Ripristina predefinito";
     action_details => "Settings of this action", "Impostazioni di questa azione";
     grp_basic => "Mouse", "Mouse";

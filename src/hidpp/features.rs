@@ -63,6 +63,8 @@ pub mod id {
     pub const HOSTS_INFO: u16 = 0x1815;
     /// Backlight2: keyboard backlight.
     pub const BACKLIGHT2: u16 = 0x1982;
+    /// EnableHiddenFeatures: unlocks Logitech's engineering features.
+    pub const ENABLE_HIDDEN_FEATURES: u16 = 0x1E00;
 }
 
 /// Human-readable name of a feature id, for `scan` output and logs.
@@ -83,6 +85,7 @@ pub fn feature_name(feature: u16) -> &'static str {
         0x1000 => "BatteryStatus",
         0x1004 => "UnifiedBattery",
         0x1602 => "PasswordAuthentication",
+        0x1801 => "ManufacturingMode",
         0x1802 => "DeviceReset",
         0x1803 => "GpioAccess",
         0x1805 => "OobState",
@@ -92,11 +95,16 @@ pub fn feature_name(feature: u16) -> &'static str {
         0x1815 => "HostsInfo",
         0x1816 => "BleProPrepairing",
         0x1830 => "PowerModes",
+        0x1890 => "RfTest",
+        0x1891 => "RfTestBle",
+        0x18A1 => "LedSoftwareControl",
         0x1B04 => "ReprogControlsV4",
         0x1D4B => "WirelessDeviceStatus",
         0x1DF3 => "EquadDjDebug",
         0x1E00 => "EnableHiddenFeatures",
         0x1E02 => "ManageDeactivatableFeatures",
+        0x1E22 => "SpiDirectAccess",
+        0x1EB0 => "TdeAccessToNvm",
         0x2110 => "SmartShift",
         0x2111 => "SmartShiftEnhanced",
         0x2121 => "HiResWheel",
@@ -123,12 +131,15 @@ pub fn feature_name(feature: u16) -> &'static str {
 #[derive(Debug, Clone, Default)]
 pub struct FeatureTable {
     map: BTreeMap<u16, u8>,
+    /// Feature id -> `(type flags, version)` as reported by FeatureSet.
+    info: BTreeMap<u16, (u8, u8)>,
 }
 
 impl FeatureTable {
     /// Reads the complete feature list through the FeatureSet feature.
     pub fn discover(t: &mut Transport, index: u8) -> Result<Self, HidppError> {
         let mut map = BTreeMap::from([(id::ROOT, 0u8)]);
+        let mut info = BTreeMap::new();
         // Root.getFeature(0x0001) -> [index, type, version]
         let fs = t.call(index, 0x00, 0, &id::FEATURE_SET.to_be_bytes())?;
         let fs_index = *fs.first().ok_or(HidppError::MalformedResponse)?;
@@ -144,10 +155,14 @@ impl FeatureTable {
             // FeatureSet.getFeatureId(i) -> [id_hi, id_lo, type, version]
             let p = t.call(index, fs_index, 1, &[i])?;
             if p.len() >= 2 {
-                map.insert(u16::from_be_bytes([p[0], p[1]]), i);
+                let fid = u16::from_be_bytes([p[0], p[1]]);
+                map.insert(fid, i);
+                if p.len() >= 4 {
+                    info.insert(fid, (p[2], p[3]));
+                }
             }
         }
-        Ok(Self { map })
+        Ok(Self { map, info })
     }
 
     /// The feature index of `feature` on this device, if it has the feature.
@@ -163,6 +178,78 @@ impl FeatureTable {
     /// `(feature id, feature index)` pairs in id order.
     pub fn iter(&self) -> impl Iterator<Item = (u16, u8)> + '_ {
         self.map.iter().map(|(k, v)| (*k, *v))
+    }
+
+    /// The feature at `index`, if any (to name the feature of a raw frame).
+    pub fn id_at(&self, index: u8) -> Option<u16> {
+        self.map.iter().find(|(_, i)| **i == index).map(|(k, _)| *k)
+    }
+
+    /// Every feature with its index, version and type flags.
+    pub fn entries(&self) -> Vec<FeatureEntry> {
+        self.map
+            .iter()
+            .map(|(&id, &index)| {
+                let (flags, version) = self.info.get(&id).copied().unwrap_or_default();
+                FeatureEntry {
+                    id,
+                    index,
+                    version,
+                    flags,
+                }
+            })
+            .collect()
+    }
+}
+
+/// One feature of a device, as listed by FeatureSet.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FeatureEntry {
+    /// Feature id, e.g. `0x2201`.
+    pub id: u16,
+    /// Position in the device's table (byte 2 of a request).
+    pub index: u8,
+    /// Version of the feature implemented by the device.
+    pub version: u8,
+    /// Type flags; see the `is_*` methods.
+    pub flags: u8,
+}
+
+impl FeatureEntry {
+    /// Kept only for older software.
+    pub fn is_obsolete(&self) -> bool {
+        self.flags & 0x80 != 0
+    }
+
+    /// Not meant to be used by ordinary software ("software hidden").
+    pub fn is_hidden(&self) -> bool {
+        self.flags & 0x40 != 0
+    }
+
+    /// For Logitech's own engineering and factory tools.
+    pub fn is_engineering(&self) -> bool {
+        self.flags & 0x20 != 0
+    }
+
+    /// Short labels of the set flags, e.g. `["hidden", "engineering"]`.
+    pub fn flag_names(&self) -> Vec<&'static str> {
+        let mut v = Vec::new();
+        if self.is_obsolete() {
+            v.push("obsolete");
+        }
+        if self.is_hidden() {
+            v.push("hidden");
+        }
+        if self.is_engineering() {
+            v.push("engineering");
+        }
+        if self.flags & 0x10 != 0 {
+            v.push("manufacturing-deactivatable");
+        }
+        if self.flags & 0x08 != 0 {
+            v.push("compliance-deactivatable");
+        }
+        v
     }
 }
 

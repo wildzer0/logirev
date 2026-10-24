@@ -165,6 +165,28 @@ stranger nearby could otherwise pair their keyboard with your computer:
 Removing a device writes action `03` and the slot number to the same
 registers (`B2` for Unifying, `C1` for Bolt).
 
+### Feature types and hidden features
+
+When a device lists its features (`FeatureSet`, function 1) each answer has
+a *type* byte with these flags:
+
+| Bit | Name | Meaning |
+|---|---|---|
+| `80` | obsolete | kept only for older software |
+| `40` | hidden | not meant for ordinary software |
+| `20` | engineering | for Logitech's own development and factory tools |
+| `10` / `08` | deactivatable | can be switched off at the factory / for compliance |
+
+Some engineering features appear only after `EnableHiddenFeatures`
+(`0x1E00`, function 1, parameter `01`) is switched on; the switch is
+forgotten when the device powers off. `logirevctl scan --hidden` switches it
+on for a moment to *list* them and then off again; logirev never calls them,
+because they can reset or reconfigure the device.
+
+Reading the firmware or the memory of a device is not part of HID++:
+firmware updates only go from the computer to the device, and on Bolt
+devices the firmware is signed and encrypted.
+
 ## 5. Errors
 
 If a question cannot be answered, the reply has `FF` (or `8F` from the

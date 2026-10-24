@@ -81,6 +81,13 @@ pub mod icon {
     pub const LIGHTBULB: &str = "\u{E2DC}";
     pub const STACK: &str = "\u{E466}";
     pub const HAND_SWIPE_RIGHT: &str = "\u{EC92}";
+    pub const CODE: &str = "\u{E1BC}";
+    pub const CPU: &str = "\u{E610}";
+    pub const PAUSE: &str = "\u{E39E}";
+    pub const PLAY: &str = "\u{E3D0}";
+    pub const CLIPBOARD_TEXT: &str = "\u{E198}";
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub const FLOPPY_DISK: &str = "\u{E248}";
 }
 
 /// Accent colours (same in both themes).

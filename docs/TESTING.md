@@ -163,6 +163,17 @@ latest published release (e.g. set `version = "0.9.0"` locally).
 | N9 | `logirevctl unpair 3` / `logirevctl pair` (service running) | Same results from the terminal; the window updates. |
 | N10 | Unifying receiver (if available) | *Pair a new device* → turn on the device → "Done!". |
 
+## O. Developer mode
+
+| # | Do | Expect |
+|---|---|---|
+| O1 | *Settings* → *Developer mode* → tick *Show technical details*; open the MX Ergo S | A *Technical* tab appears (after a moment: "Reading the technical details..."). |
+| O2 | *Technical* tab | Serial number, unit id, model ids per connection, firmware components (application running, bootloader...), feature list with *hidden* / *engineering* labels. |
+| O3 | Press a remapped button, change the DPI | New lines in *HID++ messages* within half a second; *Pause* freezes the list; *Only this device* hides other slots. |
+| O4 | *Copy report*, paste in a text editor | JSON with the device and the recent messages. *Save report...* writes the same to a file. |
+| O5 | Untick developer mode | The tab disappears; the service stops recording messages (no extra CPU). |
+| O6 | `logirevctl scan --hidden` | Identity and firmware components per device, then "hidden features (unlocked for a moment, then locked again)" with the list, or "none beyond the list above". The device keeps working normally afterwards. |
+
 ## J. Command-line tools
 
 | # | Do | Expect |
