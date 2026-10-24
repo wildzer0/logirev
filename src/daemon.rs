@@ -405,11 +405,11 @@ impl Daemon {
         if let Ok(level) = config::level_filter(&new.logging.level) {
             log::set_max_level(level);
         }
+        self.cfg = new;
         let mut ctx = ctx!(self);
         for link in &mut self.links {
-            link.reset_all(&mut ctx);
+            link.apply_new_config(&mut ctx);
         }
-        self.cfg = new;
         self.dirty = true;
         info!("configuration reloaded; re-applying profiles (log file and capture settings need a restart)");
     }
@@ -1281,45 +1281,8 @@ impl Link {
             }
         }
 
-        let Some(index) = cfg
-            .profiles
-            .iter()
-            .position(|p| p.matcher.fits(&name, kind))
-        else {
-            info!("slot {slot}: \"{name}\" ({kind}) connected{battery_text}; no profile matches, leaving it unchanged");
-            return Ok(session);
-        };
-        let profile = &cfg.profiles[index];
-        info!(
-            "slot {slot}: \"{name}\" ({kind}) connected{battery_text}; applying profile \"{}\"",
-            profile.name
-        );
-        session.profile = Some(index);
-        apply_settings(&mut dev, &features, profile, slot);
-        if features.has(id::POINTER_SPEED) {
-            session.base_speed = profile.pointer_speed.or_else(|| dev.pointer_speed().ok());
-        }
-        if features.has(id::ADJUSTABLE_DPI) {
-            session.base_dpi = profile.dpi.or_else(|| dev.dpi().ok());
-        }
-        if features.has(id::BACKLIGHT2) {
-            session.backlight = apply_backlight(&mut dev, profile, slot);
-        }
-        let wanted = profile.buttons_for(app);
-        if !wanted.is_empty() && !features.has(id::REPROG_CONTROLS_V4) {
-            warn!(
-                "slot {slot}: device has no reprogrammable buttons, ignoring the buttons section"
-            );
-        }
-        apply_buttons(
-            &mut dev,
-            &session.controls,
-            &mut session.diverted,
-            &mut session.raw_xy,
-            wanted,
-            slot,
-        );
-        info!("slot {slot}: {} button(s) remapped", session.diverted.len());
+        info!("slot {slot}: \"{name}\" ({kind}) connected{battery_text}");
+        apply_profile(&mut dev, cfg, app, slot, &mut session);
         Ok(session)
     }
 
@@ -1377,13 +1340,24 @@ impl Link {
         }
     }
 
-    /// Restores every device, then configures them again (new configuration).
-    fn reset_all(&mut self, ctx: &mut Ctx) {
-        self.restore_all(ctx);
-        let slots: Vec<u8> = std::mem::take(&mut self.sessions).into_keys().collect();
-        for slot in slots {
-            self.schedule(slot, Duration::ZERO);
+    /// Applies a new configuration to the connected devices.
+    ///
+    /// The devices stay connected: only what the profile changes is sent
+    /// (a few short messages), so the settings window never sees them
+    /// disappear. Devices still being set up get the new profile when ready.
+    fn apply_new_config(&mut self, ctx: &mut Ctx) {
+        self.release_all(ctx);
+        for (slot, s) in self.sessions.iter_mut() {
+            let features = s.features.clone();
+            let mut dev = Device::new(&mut self.t, *slot, &features);
+            if let Some(slow) = s.slow.take() {
+                let _ = restore_normal(&mut dev, slow, s.base_speed, s.base_dpi);
+            }
+            s.gesture = None;
+            s.repeat = None;
+            apply_profile(&mut dev, ctx.cfg, ctx.app, *slot, s);
         }
+        self.changed = true;
     }
 
     /// Releases any key/click still held (avoids "stuck" keys).
@@ -1393,6 +1367,55 @@ impl Link {
             s.pressed.clear();
         }
     }
+}
+
+/// Applies the first profile matching the device in `slot`; with none, the
+/// device gets its own button behaviour back.
+fn apply_profile(dev: &mut Device, cfg: &Config, app: Option<&str>, slot: u8, s: &mut Session) {
+    let features = s.features.clone();
+    s.profile = cfg
+        .profiles
+        .iter()
+        .position(|p| p.matcher.fits(&s.name, s.kind));
+    let Some(profile) = s.profile.map(|i| &cfg.profiles[i]) else {
+        info!(
+            "slot {slot}: no profile matches \"{}\", leaving it unchanged",
+            s.name
+        );
+        apply_buttons(
+            dev,
+            &s.controls,
+            &mut s.diverted,
+            &mut s.raw_xy,
+            BTreeMap::new(),
+            slot,
+        );
+        return;
+    };
+    info!("slot {slot}: applying profile \"{}\"", profile.name);
+    apply_settings(dev, &features, profile, slot);
+    if features.has(id::POINTER_SPEED) {
+        s.base_speed = profile.pointer_speed.or_else(|| dev.pointer_speed().ok());
+    }
+    if features.has(id::ADJUSTABLE_DPI) {
+        s.base_dpi = profile.dpi.or_else(|| dev.dpi().ok());
+    }
+    if features.has(id::BACKLIGHT2) {
+        s.backlight = apply_backlight(dev, profile, slot);
+    }
+    let wanted = profile.buttons_for(app);
+    if !wanted.is_empty() && !features.has(id::REPROG_CONTROLS_V4) {
+        warn!("slot {slot}: device has no reprogrammable buttons, ignoring the buttons section");
+    }
+    apply_buttons(
+        dev,
+        &s.controls,
+        &mut s.diverted,
+        &mut s.raw_xy,
+        wanted,
+        slot,
+    );
+    info!("slot {slot}: {} button(s) remapped", s.diverted.len());
 }
 
 /// Releases the keys/clicks of the buttons a session reports as held.

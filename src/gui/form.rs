@@ -5,10 +5,10 @@
 //! built from a [`RawAction`] (as stored in the configuration file) and
 //! turned back into one with [`ActionForm::to_raw`].
 
-use eframe::egui::{self, ComboBox, RichText, Ui};
+use eframe::egui::{self, ComboBox, CornerRadius, RichText, Stroke, Ui};
 
 use super::i18n::{fill, T};
-use super::style::{icon, palette};
+use super::style::{icon, palette, ACCENT};
 use crate::config::{BacklightChange, RawAction, RawHost, ScrollDirection};
 use crate::input::keys::{MouseButton, KEYS};
 
@@ -33,6 +33,25 @@ pub enum Kind {
 }
 
 impl Kind {
+    fn icon(self) -> &'static str {
+        match self {
+            Kind::Default => icon::ARROW_U_UP_LEFT,
+            Kind::Disable => icon::PROHIBIT,
+            Kind::Keys => icon::KEYBOARD,
+            Kind::Click => icon::MOUSE_LEFT_CLICK,
+            Kind::Scroll => icon::MOUSE_SCROLL,
+            Kind::Command => icon::TERMINAL_WINDOW,
+            Kind::SlowDpi => icon::CROSSHAIR,
+            Kind::CycleDpi => icon::GAUGE,
+            Kind::ChangeHost => icon::DESKTOP,
+            Kind::Brightness => icon::SUN,
+            Kind::Backlight => icon::LIGHTBULB,
+            Kind::Macro => icon::STACK,
+            Kind::Gesture => icon::HAND_SWIPE_RIGHT,
+            Kind::Custom => icon::FILE_TEXT,
+        }
+    }
+
     fn label(self, t: &T) -> &'static str {
         match self {
             Kind::Default => t.act_default,
@@ -91,6 +110,11 @@ pub struct ActionForm {
     threshold: u16,
     /// The original action when `kind` is `Custom`.
     custom: Option<RawAction>,
+    /// Chosen from "more actions": show its settings even if it equals a
+    /// ready-made action.
+    advanced: bool,
+    /// The form has been drawn at least once.
+    shown: bool,
 }
 
 impl Default for ActionForm {
@@ -117,6 +141,8 @@ impl Default for ActionForm {
             gesture: Vec::new(),
             threshold: 50,
             custom: None,
+            advanced: false,
+            shown: false,
         }
     }
 }
@@ -322,44 +348,151 @@ impl ActionForm {
     }
 
     /// Draws the form. `nested` = inside a gesture (no gestures there).
+    ///
+    /// At the top level the choices are tiles: ready-made actions applied
+    /// with one click, then "more actions" that open their own settings.
+    /// Inside a gesture the same choices are in a drop-down list.
     pub fn ui(&mut self, ui: &mut Ui, fc: &FormContext, id: &str, nested: bool) {
         let t = fc.t;
-        let mut kinds = vec![
-            Kind::Default,
-            Kind::Disable,
-            Kind::Keys,
-            Kind::Click,
-            Kind::Scroll,
-            Kind::Command,
-        ];
+        let groups = presets(fc, nested);
+        let current = self.to_raw();
+        let matched = (!self.advanced)
+            .then(|| {
+                groups
+                    .iter()
+                    .flat_map(|(_, g)| g)
+                    .find(|p| p.action == current)
+            })
+            .flatten();
+        let mut kinds = vec![Kind::Keys, Kind::Click, Kind::Scroll, Kind::Command];
+        if !nested && !fc.dpi_values.is_empty() {
+            kinds.extend([Kind::SlowDpi, Kind::CycleDpi]);
+        }
+        kinds.extend([Kind::ChangeHost, Kind::Brightness]);
         if !nested {
-            if !fc.dpi_values.is_empty() {
-                kinds.extend([Kind::SlowDpi, Kind::CycleDpi]);
-            }
-            kinds.extend([
-                Kind::ChangeHost,
-                Kind::Brightness,
-                Kind::Backlight,
-                Kind::Macro,
-                Kind::Gesture,
-            ]);
-        } else {
-            kinds.extend([Kind::ChangeHost, Kind::Brightness, Kind::Macro]);
+            kinds.push(Kind::Backlight);
+        }
+        kinds.push(Kind::Macro);
+        if !nested {
+            kinds.push(Kind::Gesture);
         }
         if self.kind == Kind::Custom {
             kinds.push(Kind::Custom);
         }
 
-        ComboBox::from_id_salt(format!("{id}-kind"))
-            .width(280.0)
-            .selected_text(self.kind.label(t))
-            .show_ui(ui, |ui| {
-                for k in kinds {
-                    ui.selectable_value(&mut self.kind, k, k.label(t));
+        let mut chosen: Option<Option<RawAction>> = None;
+        let mut chosen_kind = None;
+        if nested {
+            let selected = match matched {
+                Some(p) => p.label,
+                None => self.kind.label(t),
+            };
+            ComboBox::from_id_salt(format!("{id}-kind"))
+                .width(240.0)
+                .height(360.0)
+                .selected_text(selected)
+                .show_ui(ui, |ui| {
+                    for (title, group) in &groups {
+                        ui.label(RichText::new(*title).small().color(palette(fc.dark).muted));
+                        for p in group {
+                            let on = matched.is_some_and(|m| std::ptr::eq(m, p));
+                            if ui
+                                .selectable_label(on, format!("{}  {}", p.icon, p.label))
+                                .clicked()
+                            {
+                                chosen = Some(p.action.clone());
+                            }
+                        }
+                    }
+                    ui.separator();
+                    for &k in &kinds {
+                        let on = matched.is_none() && self.kind == k;
+                        if ui
+                            .selectable_label(on, format!("{}  {}", k.icon(), k.label(t)))
+                            .clicked()
+                        {
+                            chosen_kind = Some(k);
+                        }
+                    }
+                });
+        } else {
+            for (title, group) in &groups {
+                ui.label(RichText::new(*title).strong());
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(TILE_GAP, TILE_GAP);
+                    let w = tile_width(ui);
+                    for p in group {
+                        let on = matched.is_some_and(|m| std::ptr::eq(m, p));
+                        if tile(ui, w, p.icon, p.label, on, fc.dark).clicked() {
+                            chosen = Some(p.action.clone());
+                        }
+                    }
+                });
+                ui.add_space(8.0);
+            }
+            ui.label(RichText::new(t.grp_more).strong());
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(TILE_GAP, TILE_GAP);
+                let w = tile_width(ui);
+                for &k in &kinds {
+                    let on = matched.is_none() && self.kind == k;
+                    let label = if k == Kind::Keys {
+                        t.adv_keys
+                    } else {
+                        k.label(t)
+                    };
+                    if tile(ui, w, k.icon(), label, on, fc.dark).clicked() {
+                        chosen_kind = Some(k);
+                    }
                 }
             });
-        ui.add_space(4.0);
+        }
+        let picked = chosen.is_some();
+        if let Some(action) = chosen {
+            *self = ActionForm::from_raw(action.as_ref());
+        }
+        if let Some(k) = chosen_kind {
+            if k == Kind::Keys && self.kind != Kind::Keys {
+                self.keys.clear();
+            }
+            self.kind = k;
+            self.advanced = true;
+            // An empty shortcut: start listening for it straight away.
+            self.recording = k == Kind::Keys && self.keys.is_empty();
+        }
 
+        let matched_now = picked || (matched.is_some() && chosen_kind.is_none());
+        if matched_now || matches!(self.kind, Kind::Default | Kind::Disable) {
+            return;
+        }
+        ui.add_space(8.0);
+        let pal = palette(fc.dark);
+        let frame = egui::Frame::new()
+            .fill(ACCENT.gamma_multiply(0.06))
+            .stroke(Stroke::new(1.0, ACCENT.gamma_multiply(0.5)))
+            .corner_radius(CornerRadius::same(10))
+            .inner_margin(egui::Margin::same(12))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(
+                    RichText::new(format!("{}  {}", self.kind.icon(), t.action_details))
+                        .strong()
+                        .color(pal.muted),
+                );
+                ui.add_space(4.0);
+                self.details_ui(ui, fc, id, nested);
+            });
+        // Bring the settings into view when they appear (they are below the
+        // tiles, possibly out of sight).
+        if !nested && (chosen_kind.is_some() || !self.shown) {
+            frame.response.scroll_to_me(Some(egui::Align::Center));
+        }
+        self.shown = true;
+    }
+
+    /// The settings of the chosen kind of action.
+    fn details_ui(&mut self, ui: &mut Ui, fc: &FormContext, id: &str, nested: bool) {
+        let t = fc.t;
         match self.kind {
             Kind::Keys => self.keys_ui(ui, fc, id),
             Kind::Click => {
@@ -627,6 +760,182 @@ impl ActionForm {
     }
 }
 
+/// A ready-made action, applied with one click.
+struct Preset {
+    icon: &'static str,
+    label: &'static str,
+    /// `None` = the button's default behaviour.
+    action: Option<RawAction>,
+}
+
+/// The ready-made actions, in groups: `(group title, actions)`.
+fn presets(fc: &FormContext, nested: bool) -> Vec<(&'static str, Vec<Preset>)> {
+    let t = fc.t;
+    let p = |icon, label, action| Preset {
+        icon,
+        label,
+        action,
+    };
+    let keys = |k: &str| Some(RawAction::Keys { keys: k.to_owned() });
+    let click = |button| Some(RawAction::Click { button });
+    let scroll = |direction| {
+        Some(RawAction::Scroll {
+            direction,
+            amount: 1,
+        })
+    };
+
+    let mut mouse = vec![
+        p(icon::ARROW_U_UP_LEFT, t.act_default, None),
+        p(icon::PROHIBIT, t.act_disable, Some(RawAction::Disable)),
+        p(icon::ARROW_LEFT, t.p_back, click(MouseButton::Back)),
+        p(icon::ARROW_RIGHT, t.p_forward, click(MouseButton::Forward)),
+        p(
+            icon::MOUSE_MIDDLE_CLICK,
+            t.p_middle,
+            click(MouseButton::Middle),
+        ),
+        p(
+            icon::CARET_LEFT,
+            t.p_scroll_left,
+            scroll(ScrollDirection::Left),
+        ),
+        p(
+            icon::CARET_RIGHT,
+            t.p_scroll_right,
+            scroll(ScrollDirection::Right),
+        ),
+    ];
+    if !nested && !fc.dpi_values.is_empty() {
+        // The supported value closest to 400 DPI: slow enough for precise
+        // work, still usable.
+        let dpi = fc
+            .dpi_values
+            .iter()
+            .copied()
+            .min_by_key(|v| v.abs_diff(400))
+            .unwrap_or(400);
+        mouse.push(p(
+            icon::CROSSHAIR,
+            t.p_precision,
+            Some(RawAction::ToggleDpi { dpi }),
+        ));
+    }
+    vec![
+        (t.grp_basic, mouse),
+        (
+            t.grp_edit,
+            vec![
+                p(icon::COPY, t.p_copy, keys("Ctrl+C")),
+                p(icon::SCISSORS, t.p_cut, keys("Ctrl+X")),
+                p(icon::CLIPBOARD, t.p_paste, keys("Ctrl+V")),
+                p(icon::ARROW_COUNTER_CLOCKWISE, t.p_undo, keys("Ctrl+Z")),
+                p(icon::ARROW_CLOCKWISE, t.p_redo, keys("Ctrl+Y")),
+                p(icon::SELECTION_ALL, t.p_select_all, keys("Ctrl+A")),
+            ],
+        ),
+        (
+            t.grp_system,
+            vec![
+                p(icon::SQUARES_FOUR, t.p_task_view, keys("Super+Tab")),
+                p(icon::DESKTOP, t.p_desktop, keys("Super+D")),
+                p(icon::APP_WINDOW, t.p_switch_app, keys("Alt+Tab")),
+                p(icon::LOCK, t.p_lock, keys("Super+L")),
+                p(icon::CAMERA, t.p_screenshot, keys("Super+Shift+S")),
+                p(icon::ZOOM_IN, t.p_zoom_in, keys("Ctrl+Equal")),
+                p(icon::ZOOM_OUT, t.p_zoom_out, keys("Ctrl+Minus")),
+            ],
+        ),
+        (
+            t.grp_browser,
+            vec![
+                p(icon::PLUS_SQUARE, t.p_new_tab, keys("Ctrl+T")),
+                p(icon::X_SQUARE, t.p_close_tab, keys("Ctrl+W")),
+                p(icon::ARROW_U_UP_RIGHT, t.p_next_tab, keys("Ctrl+Tab")),
+                p(icon::ARROW_U_UP_LEFT, t.p_prev_tab, keys("Ctrl+Shift+Tab")),
+                p(icon::ARROWS_CLOCKWISE, t.p_refresh, keys("F5")),
+            ],
+        ),
+        (
+            t.grp_media,
+            vec![
+                p(icon::PLAY_PAUSE, t.p_play, keys("MediaPlayPause")),
+                p(icon::SKIP_FORWARD, t.p_next_track, keys("MediaNext")),
+                p(icon::SKIP_BACK, t.p_prev_track, keys("MediaPrevious")),
+                p(icon::SPEAKER_HIGH, t.p_vol_up, keys("VolumeUp")),
+                p(icon::SPEAKER_LOW, t.p_vol_down, keys("VolumeDown")),
+                p(icon::SPEAKER_X, t.p_mute, keys("VolumeMute")),
+            ],
+        ),
+    ]
+}
+
+/// Smallest width and the height of a choice tile.
+const TILE_MIN_WIDTH: f32 = 98.0;
+const TILE_HEIGHT: f32 = 66.0;
+const TILE_GAP: f32 = 6.0;
+
+/// Width of the tiles so that a whole number of them fills the row.
+fn tile_width(ui: &Ui) -> f32 {
+    let avail = ui.available_width();
+    let cols = ((avail + TILE_GAP) / (TILE_MIN_WIDTH + TILE_GAP))
+        .floor()
+        .max(1.0);
+    ((avail - TILE_GAP * (cols - 1.0)) / cols).floor()
+}
+
+/// A clickable tile with an icon above a short label.
+fn tile(
+    ui: &mut Ui,
+    width: f32,
+    ic: &str,
+    label: &str,
+    selected: bool,
+    dark: bool,
+) -> egui::Response {
+    let pal = palette(dark);
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, TILE_HEIGHT), egui::Sense::click());
+    let (fill, stroke) = if selected {
+        (ACCENT.gamma_multiply(0.18), Stroke::new(1.5, ACCENT))
+    } else if resp.hovered() {
+        (pal.card_hover, Stroke::new(1.0, ACCENT.gamma_multiply(0.6)))
+    } else {
+        (pal.card, Stroke::new(1.0, pal.border))
+    };
+    let text = if selected {
+        ACCENT
+    } else {
+        ui.visuals().text_color()
+    };
+    let painter = ui.painter();
+    painter.rect(
+        rect,
+        CornerRadius::same(10),
+        fill,
+        stroke,
+        egui::StrokeKind::Inside,
+    );
+    painter.text(
+        rect.center_top() + egui::vec2(0.0, 20.0),
+        egui::Align2::CENTER_CENTER,
+        ic,
+        egui::FontId::proportional(22.0),
+        text,
+    );
+    let mut job = egui::text::LayoutJob::simple(
+        label.to_owned(),
+        egui::FontId::proportional(12.0),
+        text,
+        rect.width() - 10.0,
+    );
+    job.halign = egui::Align::Center;
+    job.wrap.max_rows = 2;
+    let galley = ui.fonts_mut(|f| f.layout_job(job));
+    painter.galley(egui::pos2(rect.center().x, rect.top() + 38.0), galley, text);
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text(label)
+}
+
 fn is_modifier(name: &str) -> bool {
     matches!(
         name,
@@ -817,6 +1126,28 @@ mod tests {
         assert_eq!(form.kind, Kind::Custom);
         assert!(form.to_raw().is_some());
         assert!(ActionForm::from_raw(None).to_raw().is_none());
+    }
+
+    #[test]
+    fn presets_are_valid_and_recognised() {
+        for t in [&super::super::i18n::EN, &super::super::i18n::IT] {
+            let fc = FormContext {
+                t,
+                dpi_values: &[200, 400, 800, 1600],
+                gestures: true,
+                macros: Vec::new(),
+                dark: true,
+            };
+            for (_, group) in presets(&fc, false) {
+                for p in group {
+                    if let Some(RawAction::Keys { keys }) = &p.action {
+                        assert!(crate::input::keys::parse_chord(keys).is_ok(), "{keys}");
+                    }
+                    // Opening the editor on a preset's action gives it back.
+                    assert_eq!(ActionForm::from_raw(p.action.as_ref()).to_raw(), p.action);
+                }
+            }
+        }
     }
 
     #[test]

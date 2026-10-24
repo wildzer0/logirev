@@ -214,7 +214,6 @@ texts! {
 
     // Action editor
     edit_button => "Button: {}", "Tasto: {}";
-    action => "Action", "Azione";
     save => "Save", "Salva";
     cancel => "Cancel", "Annulla";
     act_default => "Default", "Predefinito";
@@ -231,6 +230,46 @@ texts! {
     act_macro => "Macro", "Macro";
     act_gesture => "Gestures (hold and move)", "Gesture (tieni premuto e muovi)";
     act_custom => "Custom (set in the file)", "Personalizzata (nel file)";
+    current_action => "Now: {}", "Ora: {}";
+    reset_default => "Restore default", "Ripristina predefinito";
+    action_details => "Settings of this action", "Impostazioni di questa azione";
+    grp_basic => "Mouse", "Mouse";
+    grp_edit => "Text editing", "Modifica del testo";
+    grp_system => "Windows", "Windows";
+    grp_browser => "Browser", "Browser";
+    grp_media => "Music and volume", "Musica e volume";
+    grp_more => "More actions", "Altre azioni";
+    p_back => "Back", "Indietro";
+    p_forward => "Forward", "Avanti";
+    p_middle => "Middle click", "Clic centrale";
+    p_precision => "Precision mode", "Modalità precisione";
+    p_scroll_left => "Scroll left", "Scorri a sinistra";
+    p_scroll_right => "Scroll right", "Scorri a destra";
+    p_copy => "Copy", "Copia";
+    p_cut => "Cut", "Taglia";
+    p_paste => "Paste", "Incolla";
+    p_undo => "Undo", "Annulla";
+    p_redo => "Redo", "Ripeti";
+    p_select_all => "Select all", "Seleziona tutto";
+    p_task_view => "Task view", "Visualizzazione attività";
+    p_desktop => "Show desktop", "Mostra desktop";
+    p_switch_app => "Switch window", "Cambia finestra";
+    p_lock => "Lock the PC", "Blocca il PC";
+    p_screenshot => "Screenshot", "Cattura schermo";
+    p_zoom_in => "Zoom in", "Ingrandisci";
+    p_zoom_out => "Zoom out", "Riduci";
+    p_new_tab => "New tab", "Nuova scheda";
+    p_close_tab => "Close tab", "Chiudi scheda";
+    p_next_tab => "Next tab", "Scheda successiva";
+    p_prev_tab => "Previous tab", "Scheda precedente";
+    p_refresh => "Reload page", "Ricarica pagina";
+    p_play => "Play / Pause", "Riproduci / Pausa";
+    p_next_track => "Next track", "Brano successivo";
+    p_prev_track => "Previous track", "Brano precedente";
+    p_vol_up => "Volume up", "Alza volume";
+    p_vol_down => "Volume down", "Abbassa volume";
+    p_mute => "Mute", "Disattiva audio";
+    adv_keys => "Other shortcut", "Altra scorciatoia";
     custom_hint => "This button uses an action written by hand in the settings file. Choose another action to replace it.",
         "Questo tasto usa un'azione scritta a mano nel file delle impostazioni. Scegli un'altra azione per sostituirla.";
     record => "Record", "Registra";
@@ -305,7 +344,8 @@ texts! {
     stop_service => "Stop service", "Arresta servizio";
 
     // Saving
-    saved => "Saved", "Salvato";
+    saved => "Settings applied", "Impostazioni applicate";
+    applying => "Applying settings...", "Applico le impostazioni...";
     save_error => "Not saved: {}", "Non salvato: {}";
 
     // Updates

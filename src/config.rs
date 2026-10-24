@@ -268,7 +268,7 @@ impl Match {
     }
 }
 
-#[derive(Debug, Deserialize, Clone, Serialize)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Serialize)]
 #[serde(tag = "action", rename_all = "kebab-case")]
 /// A button action as written in the file (`action = "..."` plus its fields).
 pub enum RawAction {
@@ -387,7 +387,7 @@ pub enum ScrollDirection {
 }
 
 /// `host = 2` or `host = "next"`.
-#[derive(Debug, Deserialize, Clone, Serialize)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum RawHost {
     /// Computer number 1–3.
@@ -397,7 +397,7 @@ pub enum RawHost {
 }
 
 /// One step of a `sequence`: exactly one of the fields.
-#[derive(Debug, Default, Deserialize, Clone, Serialize)]
+#[derive(Debug, Default, Deserialize, Clone, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RawStep {
     #[serde(skip_serializing_if = "Option::is_none")]

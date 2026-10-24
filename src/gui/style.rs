@@ -49,6 +49,38 @@ pub mod icon {
     pub const PRESENTATION: &str = "\u{E654}";
     pub const LOCK: &str = "\u{E2FA}";
     pub const HAND_POINTING: &str = "\u{E29A}";
+    pub const ARROW_LEFT: &str = "\u{E058}";
+    pub const ARROW_RIGHT: &str = "\u{E06C}";
+    pub const ARROW_U_UP_LEFT: &str = "\u{E08A}";
+    pub const ARROW_U_UP_RIGHT: &str = "\u{E08C}";
+    pub const ARROW_CLOCKWISE: &str = "\u{E036}";
+    pub const ARROW_COUNTER_CLOCKWISE: &str = "\u{E038}";
+    pub const COPY: &str = "\u{E1CA}";
+    pub const CLIPBOARD: &str = "\u{E196}";
+    pub const SCISSORS: &str = "\u{EAE0}";
+    pub const SELECTION_ALL: &str = "\u{E746}";
+    pub const SQUARES_FOUR: &str = "\u{E464}";
+    pub const CAMERA: &str = "\u{E10E}";
+    pub const ZOOM_IN: &str = "\u{E310}";
+    pub const ZOOM_OUT: &str = "\u{E30E}";
+    pub const PLUS_SQUARE: &str = "\u{ED4A}";
+    pub const X_SQUARE: &str = "\u{E4FA}";
+    pub const PLAY_PAUSE: &str = "\u{E8BE}";
+    pub const SKIP_FORWARD: &str = "\u{E5A6}";
+    pub const SKIP_BACK: &str = "\u{E5A4}";
+    pub const SPEAKER_HIGH: &str = "\u{E44A}";
+    pub const SPEAKER_LOW: &str = "\u{E44C}";
+    pub const SPEAKER_X: &str = "\u{E45C}";
+    pub const PROHIBIT: &str = "\u{E3DE}";
+    pub const MOUSE_LEFT_CLICK: &str = "\u{E334}";
+    pub const MOUSE_MIDDLE_CLICK: &str = "\u{E338}";
+    pub const MOUSE_SCROLL: &str = "\u{E332}";
+    pub const TERMINAL_WINDOW: &str = "\u{EAE8}";
+    pub const CROSSHAIR: &str = "\u{E1D6}";
+    pub const GAUGE: &str = "\u{E628}";
+    pub const LIGHTBULB: &str = "\u{E2DC}";
+    pub const STACK: &str = "\u{E466}";
+    pub const HAND_SWIPE_RIGHT: &str = "\u{EC92}";
 }
 
 /// Accent colours (same in both themes).

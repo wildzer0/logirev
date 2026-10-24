@@ -34,6 +34,8 @@ use crate::update::{self, Release};
 
 /// Narrowest device card; the grid uses as many columns as fit.
 const CARD_MIN_WIDTH: f32 = 250.0;
+/// How long the "settings applied" message stays on screen.
+const TOAST_TIME: Duration = Duration::from_millis(2500);
 /// Wait after the last edit before saving.
 const SAVE_DELAY: Duration = Duration::from_millis(600);
 /// How often to retry connecting to the service.
@@ -110,6 +112,8 @@ pub struct SettingsApp {
     page: Page,
     tab: Tab,
     editor: Option<Editor>,
+    /// The button row under the mouse (drawn highlighted next frame).
+    hovered_row: Option<u16>,
     new_program: String,
     running_programs: Vec<String>,
     logo: Option<TextureHandle>,
@@ -160,6 +164,7 @@ impl SettingsApp {
             page: Page::Devices,
             tab: Tab::Buttons,
             editor: None,
+            hovered_row: None,
             new_program: String::new(),
             running_programs: Vec::new(),
             logo: None,
@@ -195,7 +200,7 @@ impl SettingsApp {
                     kind: DeviceKind::Trackball,
                     app: None,
                     button_key: "back".into(),
-                    button_label: "Back".into(),
+                    button_label: control_label(app.t, 0x53),
                     gestures: false,
                     dpi_values: (400..=4000).step_by(50).collect(),
                     form: ActionForm::from_raw(Some(&RawAction::Keys {
@@ -420,7 +425,10 @@ impl SettingsApp {
             self.restart_after_update(ctx);
         }
         if self.demo {
-            self.dirty_at = None;
+            // Nothing is written in the demo; just show the confirmation.
+            if self.dirty_at.take().is_some() || std::env::var_os("LOGIREV_TOAST").is_some() {
+                self.save = SaveState::Saved(Instant::now());
+            }
             return;
         }
         if !self.connected()
@@ -566,18 +574,50 @@ impl SettingsApp {
                         .small(),
                 );
             }
-            match &self.save {
-                SaveState::Saved(at) if at.elapsed() < Duration::from_secs(3) => {
-                    ui.label(
-                        RichText::new(format!("{} {}", icon::CHECK, t.saved))
-                            .color(GOOD)
-                            .small(),
-                    );
-                    ui.ctx().request_repaint_after(Duration::from_secs(1));
-                }
-                _ => {}
-            }
         });
+    }
+
+    /// A floating message at the bottom of the window while changes are
+    /// being saved and applied, then a confirmation for a moment.
+    fn save_toast(&self, ctx: &egui::Context) {
+        let t = self.t;
+        let applying = self.dirty_at.is_some();
+        let done = matches!(self.save, SaveState::Saved(at) if at.elapsed() < TOAST_TIME);
+        if !applying && !done {
+            return;
+        }
+        egui::Area::new(egui::Id::NULL.with("logirev-save-toast"))
+            .order(egui::Order::Foreground)
+            .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -24.0))
+            .interactable(false)
+            .show(ctx, |ui| {
+                let color = if applying { ACCENT } else { GOOD };
+                Frame::new()
+                    .fill(color)
+                    .corner_radius(CornerRadius::same(20))
+                    .inner_margin(Margin::symmetric(18, 10))
+                    .shadow(egui::epaint::Shadow {
+                        offset: [0, 4],
+                        blur: 16,
+                        spread: 0,
+                        color: Color32::from_black_alpha(60),
+                    })
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            if applying {
+                                ui.add(egui::Spinner::new().color(Color32::WHITE).size(16.0));
+                                ui.label(RichText::new(t.applying).color(Color32::WHITE).strong());
+                            } else {
+                                ui.label(
+                                    RichText::new(format!("{} {}", icon::CHECK_CIRCLE, t.saved))
+                                        .color(Color32::WHITE)
+                                        .strong(),
+                                );
+                            }
+                        });
+                    });
+            });
+        ctx.request_repaint_after(Duration::from_millis(250));
     }
 
     fn content(&mut self, ui: &mut Ui) {
@@ -962,6 +1002,7 @@ impl SettingsApp {
             ui.label(RichText::new(t.buttons_hint).color(pal.muted));
             ui.add_space(6.0);
         }
+        let mut hovered = None;
         for c in &details.controls {
             let current = match app {
                 None => profile.buttons.get(&c.key).cloned(),
@@ -970,7 +1011,12 @@ impl SettingsApp {
                     .get(i)
                     .and_then(|a| a.buttons.get(&c.key).cloned()),
             };
-            card_row(ui, pal.card, pal.border, |ui| {
+            let fill_color = if self.hovered_row == Some(c.cid) && c.remappable {
+                pal.card_hover
+            } else {
+                pal.card
+            };
+            let row = card_row(ui, fill_color, pal.border, |ui| {
                 ui.label(
                     RichText::new(icon::CURSOR_CLICK)
                         .size(20.0)
@@ -993,25 +1039,40 @@ impl SettingsApp {
                 });
                 if c.remappable {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui
-                            .button(format!("{} {}", icon::PENCIL, t.change))
-                            .clicked()
-                        {
-                            self.editor = Some(Editor {
-                                device: d.name.clone(),
-                                kind,
-                                app,
-                                button_key: c.key.clone(),
-                                button_label: control_label(t, c.cid),
-                                gestures: c.gestures,
-                                dpi_values: details.dpi_values.clone(),
-                                form: ActionForm::from_raw(current.as_ref()),
-                            });
-                        }
+                        ui.label(
+                            RichText::new(format!("{} {}", icon::PENCIL, t.change)).color(ACCENT),
+                        );
                     });
                 }
             });
+            if !c.remappable {
+                continue;
+            }
+            // The whole row opens the editor.
+            let resp = ui
+                .interact(
+                    row.rect,
+                    egui::Id::NULL.with(("button-row", c.cid)),
+                    Sense::click(),
+                )
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
+            if resp.hovered() {
+                hovered = Some(c.cid);
+            }
+            if resp.clicked() {
+                self.editor = Some(Editor {
+                    device: d.name.clone(),
+                    kind,
+                    app,
+                    button_key: c.key.clone(),
+                    button_label: control_label(t, c.cid),
+                    gestures: c.gestures,
+                    dpi_values: details.dpi_values.clone(),
+                    form: ActionForm::from_raw(current.as_ref()),
+                });
+            }
         }
+        self.hovered_row = hovered;
     }
 
     fn pointer_tab(&mut self, ui: &mut Ui, d: &DeviceStatus, kind: DeviceKind) {
@@ -1323,14 +1384,17 @@ impl SettingsApp {
         let t = self.t;
         let mut result: Option<bool> = None; // Some(true) = save
         let modal = egui::Modal::new(egui::Id::NULL.with("logirev-editor")).show(ctx, |ui| {
-            ui.set_width(520.0);
+            ui.set_width(600.0);
             ui.label(
                 RichText::new(fill(t.edit_button, &[&ed.button_label]))
                     .size(20.0)
                     .strong(),
             );
+            ui.label(
+                RichText::new(fill(t.current_action, &[&ed.form.summary(t)]))
+                    .color(palette(ui.visuals().dark_mode).muted),
+            );
             ui.add_space(8.0);
-            ui.label(RichText::new(t.action).strong());
             let fc = FormContext {
                 t,
                 dpi_values: &ed.dpi_values,
@@ -1338,9 +1402,11 @@ impl SettingsApp {
                 macros: self.raw.macros.keys().cloned().collect(),
                 dark: ui.visuals().dark_mode,
             };
-            ScrollArea::vertical().max_height(460.0).show(ui, |ui| {
-                ed.form.ui(ui, &fc, "editor", false);
-            });
+            ScrollArea::vertical()
+                .max_height((ctx.content_rect().height() - 180.0).max(240.0))
+                .show(ui, |ui| {
+                    ed.form.ui(ui, &fc, "editor", false);
+                });
             ui.add_space(10.0);
             ui.separator();
             ui.horizontal(|ui| {
@@ -1355,6 +1421,15 @@ impl SettingsApp {
                 if ui.button(t.cancel).clicked() {
                     result = Some(false);
                 }
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui
+                        .button(format!("{} {}", icon::ARROW_U_UP_LEFT, t.reset_default))
+                        .clicked()
+                    {
+                        ed.form = ActionForm::default();
+                        result = Some(true);
+                    }
+                });
             });
         });
         if modal.should_close() && result.is_none() {
@@ -1993,6 +2068,7 @@ impl eframe::App for SettingsApp {
             });
         self.editor_dialog(&ctx);
         self.pairing_dialog(&ctx);
+        self.save_toast(&ctx);
         self.unpair_dialog(&ctx);
     }
 }
@@ -2024,8 +2100,13 @@ fn section(
 }
 
 /// A one-line card.
-fn card_row(ui: &mut Ui, fill_color: Color32, border: Color32, add: impl FnOnce(&mut Ui)) {
-    Frame::new()
+fn card_row(
+    ui: &mut Ui,
+    fill_color: Color32,
+    border: Color32,
+    add: impl FnOnce(&mut Ui),
+) -> egui::Response {
+    let resp = Frame::new()
         .fill(fill_color)
         .stroke(Stroke::new(1.0, border))
         .corner_radius(CornerRadius::same(12))
@@ -2033,8 +2114,10 @@ fn card_row(ui: &mut Ui, fill_color: Color32, border: Color32, add: impl FnOnce(
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(add);
-        });
+        })
+        .response;
     ui.add_space(6.0);
+    resp
 }
 
 fn banner(ui: &mut Ui, color: Color32, text: &str) {

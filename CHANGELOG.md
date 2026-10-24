@@ -5,7 +5,19 @@ All notable changes are listed here. Versions follow
 
 ## [Unreleased]
 
+### Changed
+- **Button editor**: ready-made actions (Back, Copy, Paste, Task view,
+  Play / Pause, Volume...) are applied with one click; the other actions
+  are tiles that open their settings. A new shortcut starts recording at
+  once, and *Restore default* resets the button in one click. The whole
+  button row opens the editor.
+- **Saving** shows a clear message at the bottom of the window
+  ("Applying settings..." then "Settings applied").
+
 ### Fixed
+- **Saving no longer disconnects the devices** for a moment: the service
+  applies the new settings to the devices already connected instead of
+  setting them up again from scratch.
 - **Pairing a Bolt keyboard**: the device list no longer grows forever when
   the keyboard announces itself repeatedly; the list scrolls.
 - **Device list**: cards wrap onto several rows instead of being cut off.
