@@ -1085,27 +1085,58 @@ impl SettingsApp {
         section(ui, pal.card, pal.border, t.speed_title, |ui| {
             if !details.dpi_values.is_empty() {
                 ui.label(RichText::new(t.dpi).strong());
-                let mut keep = p.dpi.is_none();
-                if ui.checkbox(&mut keep, t.keep_device_value).changed() {
-                    p.dpi = if keep {
-                        None
-                    } else {
-                        Some(d.dpi.unwrap_or(details.dpi_values[0]))
-                    };
+                ui.label(RichText::new(t.dpi_hint).small().color(pal.muted));
+                let mut choose = p.dpi.is_some();
+                if segmented(
+                    ui,
+                    &mut choose,
+                    &[(false, t.keep_device_value), (true, t.choose_value)],
+                ) {
+                    p.dpi = choose.then(|| d.dpi.unwrap_or(details.dpi_values[0]));
                 }
-                if let Some(dpi) = p.dpi.as_mut() {
-                    dpi_slider(ui, dpi, &details.dpi_values);
+                match p.dpi.as_mut() {
+                    Some(dpi) => {
+                        dpi_slider(ui, dpi, &details.dpi_values);
+                        // Common values, one click each.
+                        ui.horizontal_wrapped(|ui| {
+                            for v in [400u16, 800, 1000, 1600, 2400, 3200, 4000] {
+                                if !details.dpi_values.contains(&v) {
+                                    continue;
+                                }
+                                if ui.selectable_label(*dpi == v, v.to_string()).clicked() {
+                                    *dpi = v;
+                                }
+                            }
+                        });
+                    }
+                    None => {
+                        let now = d
+                            .dpi
+                            .map(|v| fill(t.device_value_now, &[&format!("{v} DPI")]))
+                            .unwrap_or_else(|| t.device_value_unknown.to_owned());
+                        ui.label(RichText::new(now).color(pal.muted));
+                    }
                 }
+                ui.add_space(6.0);
             }
             if details.pointer_speed {
                 ui.label(RichText::new(t.pointer_speed).strong());
-                let mut keep = p.pointer_speed.is_none();
-                if ui.checkbox(&mut keep, t.keep_device_value).changed() {
-                    p.pointer_speed = if keep { None } else { Some(1.0) };
+                let mut choose = p.pointer_speed.is_some();
+                if segmented(
+                    ui,
+                    &mut choose,
+                    &[(false, t.keep_device_value), (true, t.choose_value)],
+                ) {
+                    p.pointer_speed = choose.then_some(1.0);
                 }
                 if let Some(speed) = p.pointer_speed.as_mut() {
-                    ui.add(egui::Slider::new(speed, 0.2..=2.0).step_by(0.05));
+                    ui.add(
+                        egui::Slider::new(speed, 0.2..=2.0)
+                            .step_by(0.05)
+                            .suffix("×"),
+                    );
                 }
+                ui.add_space(6.0);
             }
             if !details.report_rates.is_empty() {
                 ui.label(RichText::new(t.report_rate).strong());
@@ -2145,14 +2176,56 @@ fn empty_state(ui: &mut Ui, ic: &str, title: &str, hint: &str) {
     ui.add_space(16.0);
 }
 
-/// A setting that can be on, off or "leave it as it is".
+/// A setting that can be on, off or "leave it as it is", as three clearly
+/// labelled buttons side by side.
 fn tri_state(ui: &mut Ui, value: &mut Option<bool>, label: &str, t: &T) {
+    ui.label(RichText::new(label).strong());
+    segmented(
+        ui,
+        value,
+        &[
+            (None, t.not_set),
+            (Some(true), t.turn_on),
+            (Some(false), t.turn_off),
+        ],
+    );
+    ui.add_space(4.0);
+}
+
+/// Buttons joined in a row, one of which is selected (like a radio group).
+/// Returns true when the choice changed.
+fn segmented<V: PartialEq + Clone>(ui: &mut Ui, value: &mut V, options: &[(V, &str)]) -> bool {
+    let mut changed = false;
     ui.horizontal(|ui| {
-        ui.label(label);
-        ui.selectable_value(value, None, t.not_set);
-        ui.selectable_value(value, Some(true), "✔");
-        ui.selectable_value(value, Some(false), "✖");
+        ui.spacing_mut().item_spacing.x = 0.0;
+        let last = options.len().saturating_sub(1);
+        for (i, (v, text)) in options.iter().enumerate() {
+            let on = *value == *v;
+            let r = |first: bool, end: bool| if first || end { 8 } else { 0 };
+            let corner = CornerRadius {
+                nw: r(i == 0, false),
+                sw: r(i == 0, false),
+                ne: r(false, i == last),
+                se: r(false, i == last),
+            };
+            let text = if on {
+                RichText::new(format!("{} {text}", icon::CHECK)).color(Color32::WHITE)
+            } else {
+                RichText::new(*text)
+            };
+            let mut button = egui::Button::new(text)
+                .corner_radius(corner)
+                .min_size(egui::vec2(0.0, 28.0));
+            if on {
+                button = button.fill(ACCENT);
+            }
+            if ui.add(button).clicked() && !on {
+                *value = v.clone();
+                changed = true;
+            }
+        }
     });
+    changed
 }
 
 fn pointer_differs(a: &RawProfile, b: &RawProfile) -> bool {

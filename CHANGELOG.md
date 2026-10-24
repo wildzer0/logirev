@@ -11,6 +11,10 @@ All notable changes are listed here. Versions follow
   are tiles that open their settings. A new shortcut starts recording at
   once, and *Restore default* resets the button in one click. The whole
   button row opens the editor.
+- **Clearer choices**: on/off settings are three labelled buttons
+  ("Don't change", "On", "Off"); DPI and pointer speed say whether the
+  device keeps its own value (showing the current one) or uses a chosen
+  value, with one-click common DPI values.
 - **Saving** shows a clear message at the bottom of the window
   ("Applying settings..." then "Settings applied").
 

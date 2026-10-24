@@ -167,7 +167,14 @@ texts! {
     // Pointer tab
     speed_title => "Speed", "Velocità";
     dpi => "Sensitivity (DPI)", "Sensibilità (DPI)";
-    keep_device_value => "Keep the device's own value", "Mantieni il valore della periferica";
+    keep_device_value => "Device's own value", "Valore della periferica";
+    choose_value => "Choose a value", "Scegli un valore";
+    dpi_hint => "How far the pointer moves for the same hand movement. Lower = slower and more precise, higher = faster.",
+        "Quanto si sposta il puntatore a parità di movimento della mano. Più basso = più lento e preciso, più alto = più veloce.";
+    device_value_now => "logirev does not change it. Now: {}", "logirev non lo modifica. Ora: {}";
+    device_value_unknown => "logirev does not change it.", "logirev non lo modifica.";
+    turn_on => "On", "Attivo";
+    turn_off => "Off", "Disattivo";
     pointer_speed => "Pointer speed", "Velocità del puntatore";
     wheel_title => "Scroll wheel", "Rotella";
     hires_wheel => "High-resolution scrolling", "Scorrimento ad alta risoluzione";
@@ -179,7 +186,7 @@ texts! {
     smartshift_ratchet => "Always clicking", "Sempre a scatti";
     smartshift_free => "Always free-spinning", "Sempre a rotazione libera";
     smartshift_threshold => "Sensitivity", "Sensibilità";
-    not_set => "Leave as it is", "Lascia com'è";
+    not_set => "Don't change", "Non modificare";
     thumb_wheel_invert => "Reverse the thumb wheel", "Inverti la rotella laterale";
     report_rate => "Report rate", "Frequenza di aggiornamento";
 
