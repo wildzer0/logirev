@@ -180,6 +180,8 @@ pub struct Pairing {
     known_slots: Vec<u8>,
     /// The device chosen for pairing (Bolt).
     chosen: Option<Found>,
+    /// Bolt names whose address part has not arrived yet: `(counter, name)`.
+    pending_names: Vec<(u16, String)>,
     /// Last time the receiver told us something.
     last_news: Instant,
 }
@@ -203,6 +205,7 @@ impl Pairing {
             found: Vec::new(),
             known_slots,
             chosen: None,
+            pending_names: Vec::new(),
             last_news: Instant::now(),
         })
     }
@@ -347,31 +350,48 @@ impl Pairing {
     }
 
     /// Bolt discovery announcements (two per device, same counter).
+    /// Bolt discovery announcements. Each announcement comes in two parts
+    /// sharing a counter: part 0 (radio address, type, authentication) and
+    /// part 1 (name). A device in pairing mode keeps announcing itself, and
+    /// every repetition carries a **new** counter, so devices are identified
+    /// by their radio address; the counter only ties a name to its address.
     fn on_discovery(&mut self, address: u8, data: &[u8]) -> bool {
         if data.len() < 3 {
             return false;
         }
         let counter = u16::from(address) | (u16::from(data[0]) << 8);
+        log::debug!(
+            "bolt discovery: counter {counter:#06x}, part {}, data {data:02X?}",
+            data[1]
+        );
         match data[1] {
             0 if data.len() >= 15 => {
                 let mut addr = [0u8; 6];
                 addr.copy_from_slice(&data[6..12]);
-                let entry = Found {
-                    counter,
-                    address: addr,
-                    kind: kind_from_code(data[3] & 0x0F),
-                    authentication: data[14],
-                    name: None,
-                };
-                match self.found.iter_mut().find(|f| f.counter == counter) {
+                // The name part may have arrived first.
+                let pending = self.pending_names.iter().position(|(c, _)| *c == counter);
+                let pending_name = pending.map(|i| self.pending_names.remove(i).1);
+                match self.found.iter_mut().find(|f| f.address == addr) {
                     Some(f) => {
-                        f.address = entry.address;
-                        f.kind = entry.kind;
-                        f.authentication = entry.authentication;
+                        f.counter = counter;
+                        f.kind = kind_from_code(data[3] & 0x0F);
+                        f.authentication = data[14];
+                        if pending_name.is_some() {
+                            f.name = pending_name;
+                        }
+                        false // a repetition: nothing new to show
                     }
-                    None => self.found.push(entry),
+                    None => {
+                        self.found.push(Found {
+                            counter,
+                            address: addr,
+                            kind: kind_from_code(data[3] & 0x0F),
+                            authentication: data[14],
+                            name: pending_name,
+                        });
+                        true
+                    }
                 }
-                true
             }
             1 => {
                 let len = usize::from(data[2]);
@@ -379,16 +399,20 @@ impl Pairing {
                     .trim()
                     .to_owned();
                 match self.found.iter_mut().find(|f| f.counter == counter) {
-                    Some(f) => f.name = Some(name),
-                    None => self.found.push(Found {
-                        counter,
-                        address: [0; 6],
-                        kind: DeviceKind::Other,
-                        authentication: 0,
-                        name: Some(name),
-                    }),
+                    Some(f) if f.name.as_deref() == Some(name.as_str()) => false,
+                    Some(f) => {
+                        f.name = Some(name);
+                        true
+                    }
+                    None => {
+                        // Keep it until its address part arrives (bounded).
+                        if self.pending_names.len() >= 16 {
+                            self.pending_names.remove(0);
+                        }
+                        self.pending_names.push((counter, name));
+                        false
+                    }
                 }
-                true
             }
             _ => false,
         }
@@ -451,6 +475,7 @@ mod tests {
             found: Vec::new(),
             known_slots: known,
             chosen: None,
+            pending_names: Vec::new(),
             last_news: Instant::now(),
         }
     }
@@ -525,6 +550,35 @@ mod tests {
             !p.on_frame(&frame(0xFF, NOTIF_PAIRING_STATUS, 0x02, &[1])),
             "finished sessions ignore frames"
         );
+    }
+
+    /// A device in pairing mode repeats its announcement with a new counter
+    /// every time: it must appear once (regression: it was listed forever).
+    #[test]
+    fn bolt_repeated_announcements_are_one_device() {
+        let mut p = session(Family::Bolt, vec![]);
+        let addr_part = |c_hi: u8| vec![c_hi, 0x00, 0x00, 0x01, 0, 0, 9, 8, 7, 6, 5, 4, 0, 0, 0x01];
+        let name_part = |c_hi: u8| {
+            let mut d = vec![c_hi, 0x01, 0x09];
+            d.extend_from_slice(b"Wave Keys");
+            d
+        };
+        for counter in 0u8..50 {
+            // Alternate the order of the two parts.
+            if counter % 2 == 0 {
+                p.on_frame(&frame(0xFF, NOTIF_DEVICE_DISCOVERY, counter, &addr_part(0)));
+                p.on_frame(&frame(0xFF, NOTIF_DEVICE_DISCOVERY, counter, &name_part(0)));
+            } else {
+                p.on_frame(&frame(0xFF, NOTIF_DEVICE_DISCOVERY, counter, &name_part(0)));
+                p.on_frame(&frame(0xFF, NOTIF_DEVICE_DISCOVERY, counter, &addr_part(0)));
+            }
+        }
+        assert_eq!(p.found.len(), 1, "one device, however many announcements");
+        let f = &p.found[0];
+        assert_eq!(f.name.as_deref(), Some("Wave Keys"));
+        assert_eq!(f.kind, DeviceKind::Keyboard);
+        assert!(f.uses_keyboard_passkey());
+        assert!(p.pending_names.len() <= 16);
     }
 
     #[test]

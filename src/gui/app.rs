@@ -32,6 +32,8 @@ use crate::ipc::{Client, ToService};
 use crate::status::{DeviceStatus, LinkStatus, Snapshot};
 use crate::update::{self, Release};
 
+/// Narrowest device card; the grid uses as many columns as fit.
+const CARD_MIN_WIDTH: f32 = 250.0;
 /// Wait after the last edit before saving.
 const SAVE_DELAY: Duration = Duration::from_millis(600);
 /// How often to retry connecting to the service.
@@ -239,7 +241,7 @@ impl SettingsApp {
                 });
             }
             let release = Release {
-                tag_name: "v1.1.0".into(),
+                tag_name: "v9.9.0".into(),
                 html_url: env!("CARGO_PKG_REPOSITORY").into(),
                 body: "- Example release notes\n- Shown in demo mode only".into(),
                 assets: Vec::new(),
@@ -697,31 +699,46 @@ impl SettingsApp {
             if link.devices.is_empty() {
                 ui.label(t.no_devices);
             }
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(14.0, 14.0);
-                for d in &link.devices {
-                    match self.device_card(ui, link, d) {
-                        CardAction::Open => {
-                            self.page = Page::Device {
-                                link: link.key.clone(),
-                                slot: d.slot,
-                            };
-                            self.tab = Tab::Buttons;
+            // Responsive grid: as many columns as fit, cards share the width.
+            let gap = 14.0;
+            let avail = ui.available_width();
+            let columns = (((avail + gap) / (CARD_MIN_WIDTH + gap)).floor() as usize).clamp(1, 4);
+            let card_width = (avail - gap * (columns as f32 - 1.0)) / columns as f32;
+            for row in link.devices.chunks(columns) {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(gap, gap);
+                    for d in row {
+                        match self.device_card(ui, link, d, card_width) {
+                            CardAction::Open => {
+                                self.page = Page::Device {
+                                    link: link.key.clone(),
+                                    slot: d.slot,
+                                };
+                                self.tab = Tab::Buttons;
+                            }
+                            CardAction::Unpair => {
+                                self.confirm_unpair =
+                                    Some((link.key.clone(), d.slot, d.name.clone()));
+                            }
+                            CardAction::None => {}
                         }
-                        CardAction::Unpair => {
-                            self.confirm_unpair = Some((link.key.clone(), d.slot, d.name.clone()));
-                        }
-                        CardAction::None => {}
                     }
-                }
-            });
+                });
+                ui.add_space(gap);
+            }
             ui.add_space(16.0);
         }
     }
 
     /// One device card: a click opens the device (if connected); the
     /// right-click menu can remove the pairing.
-    fn device_card(&self, ui: &mut Ui, link: &LinkStatus, d: &DeviceStatus) -> CardAction {
+    fn device_card(
+        &self,
+        ui: &mut Ui,
+        link: &LinkStatus,
+        d: &DeviceStatus,
+        width: f32,
+    ) -> CardAction {
         let t = self.t;
         let dark = ui.visuals().dark_mode;
         let pal = palette(dark);
@@ -733,8 +750,9 @@ impl SettingsApp {
             .corner_radius(CornerRadius::same(16))
             .inner_margin(Margin::same(18));
         let inner = frame.show(ui, |ui| {
-            ui.set_width(250.0);
-            ui.set_min_height(118.0);
+            // The frame adds its margin and border around the content.
+            ui.set_width(width - 38.0);
+            ui.set_min_height(132.0);
             // The card sits in a wrapping row: lay its content out vertically.
             ui.vertical(|ui| {
                 let faded = |c: Color32| if d.online { c } else { c.gamma_multiply(0.45) };
@@ -1418,32 +1436,37 @@ impl SettingsApp {
                         ui.spinner();
                         ui.label(t.searching);
                     });
-                    for (i, f) in p.found.iter().enumerate() {
-                        let ready = f.address != [0; 6];
-                        card_row(ui, pal.card, pal.border, |ui| {
-                            ui.label(
-                                RichText::new(style::kind_icon(&f.kind.to_string()))
-                                    .size(22.0)
-                                    .color(ACCENT),
-                            );
-                            ui.label(
-                                RichText::new(f.name.clone().unwrap_or_else(|| f.kind.to_string()))
+                    // Bounded height: the buttons below must stay reachable.
+                    ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+                        for (i, f) in p.found.iter().enumerate() {
+                            let ready = f.address != [0; 6];
+                            card_row(ui, pal.card, pal.border, |ui| {
+                                ui.label(
+                                    RichText::new(style::kind_icon(&f.kind.to_string()))
+                                        .size(22.0)
+                                        .color(ACCENT),
+                                );
+                                ui.label(
+                                    RichText::new(
+                                        f.name.clone().unwrap_or_else(|| f.kind.to_string()),
+                                    )
                                     .strong(),
-                            );
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                let b = egui::Button::new(
-                                    RichText::new(t.pair_this).color(Color32::WHITE),
-                                )
-                                .fill(ACCENT);
-                                if ui.add_enabled(ready, b).clicked() {
-                                    send = Some(ToService::ChoosePairing {
-                                        link: key.clone(),
-                                        index: i,
-                                    });
-                                }
+                                );
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                    let b = egui::Button::new(
+                                        RichText::new(t.pair_this).color(Color32::WHITE),
+                                    )
+                                    .fill(ACCENT);
+                                    if ui.add_enabled(ready, b).clicked() {
+                                        send = Some(ToService::ChoosePairing {
+                                            link: key.clone(),
+                                            index: i,
+                                        });
+                                    }
+                                });
                             });
-                        });
-                    }
+                        }
+                    });
                 }
                 Stage::Pairing => {
                     ui.horizontal(|ui| {
