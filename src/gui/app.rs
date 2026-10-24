@@ -2028,18 +2028,28 @@ impl SettingsApp {
                 |ui| {
                     ui.horizontal(|ui| {
                         ui.label(t.macro_name);
-                        let mut new_name = name.clone();
-                        if ui
-                            .add(egui::TextEdit::singleline(&mut new_name).desired_width(200.0))
-                            .lost_focus()
-                            && new_name != name
-                        {
+                        // The draft lives in egui memory until the field loses
+                        // focus: rebuilding it from `name` every frame would
+                        // discard what the user types.
+                        let draft_id = ui.scope_id().with(("macro-name", &name));
+                        let mut new_name = ui
+                            .ctx()
+                            .data(|d| d.get_temp::<String>(draft_id))
+                            .unwrap_or_else(|| name.clone());
+                        let resp =
+                            ui.add(egui::TextEdit::singleline(&mut new_name).desired_width(200.0));
+                        if resp.changed() {
+                            ui.ctx()
+                                .data_mut(|d| d.insert_temp(draft_id, new_name.clone()));
+                        }
+                        if resp.lost_focus() {
+                            ui.ctx().data_mut(|d| d.remove::<String>(draft_id));
                             let clean: String = new_name
                                 .trim()
                                 .chars()
                                 .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
                                 .collect();
-                            if !clean.is_empty() {
+                            if !clean.is_empty() && clean != name {
                                 rename = Some((name.clone(), clean));
                             }
                         }

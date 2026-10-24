@@ -3,6 +3,11 @@
 All notable changes are listed here. Versions follow
 [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Fixed
+- Macros could not be renamed: the name field discarded every key typed.
+
 ## [1.3.0] — 2026-10-24
 
 ### Added
