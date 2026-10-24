@@ -102,7 +102,7 @@ pub fn run(opts: &ServiceOptions) -> ExitCode {
         Ok(p) => p,
         Err(e) if e.contains("already running") && cfg!(feature = "gui") => {
             // Started again while running: the user wants the window.
-            open_settings(opts.config.as_deref());
+            open_settings(opts.config.as_deref(), false);
             return ExitCode::SUCCESS;
         }
         Err(e) if e.contains("already running") => {
@@ -121,7 +121,7 @@ pub fn run(opts: &ServiceOptions) -> ExitCode {
     match start(prepared, opts) {
         // Started by the user (not at log-in): show the window too.
         Ok(()) if !opts.background && cfg!(feature = "gui") => {
-            open_settings(opts.config.as_deref())
+            open_settings(opts.config.as_deref(), opts.after_update)
         }
         Ok(()) => {}
         Err(e) => {
@@ -225,6 +225,9 @@ fn start(p: Prepared, opts: &ServiceOptions) -> Result<(), String> {
         }
     };
     crate::foreground::watch(tx.clone());
+    if p.cfg.general.check_updates {
+        crate::update::spawn_checker(tx.clone());
+    }
     let ipc_for_daemon = app::start_ipc(&tx);
     let (cfg, config_path, pcap) = (p.cfg, p.config_path.clone(), p.pcap);
     let daemon_tx = tx.clone();
@@ -274,12 +277,16 @@ fn start(p: Prepared, opts: &ServiceOptions) -> Result<(), String> {
 }
 
 /// Starts the settings window (a separate `logirev --settings` process).
-fn open_settings(config: Option<&std::path::Path>) {
+fn open_settings(config: Option<&std::path::Path>, after_update: bool) {
     let Ok(exe) = std::env::current_exe() else {
         return;
     };
     let mut cmd = std::process::Command::new(exe);
     cmd.arg("--settings");
+    if after_update {
+        // The window of the old version may still be closing.
+        cmd.arg("--after-update");
+    }
     if let Some(c) = config {
         cmd.arg("--config").arg(c);
     }
@@ -433,7 +440,7 @@ fn run_command(cmd: Command) {
         #[cfg(feature = "gui")]
         Command::ShowDevices => {
             if let Some(custom) = with_state(|s| s.custom_config.then(|| s.config_path.clone())) {
-                open_settings(custom.as_deref());
+                open_settings(custom.as_deref(), false);
             }
         }
         #[cfg(not(feature = "gui"))]

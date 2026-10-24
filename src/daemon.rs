@@ -101,6 +101,8 @@ pub enum Event {
     /// Send one device to another computer (from the tray menu):
     /// `link` = [`LinkStatus::key`], `host` counted from 0.
     ChangeHost { link: String, slot: u8, host: u8 },
+    /// A newer version is published (from the update checker).
+    UpdateAvailable(String),
     /// Stop: restore every device and return.
     Quit,
 }
@@ -223,6 +225,13 @@ impl Daemon {
                     }
                     Event::Reload => self.reload_config(),
                     Event::Foreground(program) => self.set_foreground(&program),
+                    Event::UpdateAvailable(version) => {
+                        info!("logirev {version} is available");
+                        self.notify(
+                            "Update available",
+                            &format!("logirev {version} is available. Open logirev to install it."),
+                        );
+                    }
                     Event::ChangeHost { link, slot, host } => {
                         if let Some(l) = self.links.iter_mut().find(|l| l.key == link) {
                             l.change_host(slot, HostTarget::Index(host));

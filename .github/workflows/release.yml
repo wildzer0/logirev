@@ -71,21 +71,24 @@ jobs:
           cp "target/${{ matrix.target }}/release/logirevctl${{ matrix.exe }}" "$dir/"
           cp README.md CHANGELOG.md LICENSE.md "$dir/"
           cp docs/*.md "$dir/docs/"
+          cp -r docs/images "$dir/docs/"
           cp config/logirev.toml "$dir/logirev.example.toml"
           cp tools/hidpp.lua "$dir/tools/"
+          mkdir -p out
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            7z a "$dir.zip" "$dir" > /dev/null
-            echo "ASSET=$dir.zip" >> "$GITHUB_ENV"
+            7z a "out/$dir.zip" "$dir" > /dev/null
+            # Bare executables for the automatic updater (see src/update.rs).
+            cp "$dir/logirev.exe" "out/logirev-${GITHUB_REF_NAME}-windows-x64.exe"
+            cp "$dir/logirevctl.exe" "out/logirevctl-${GITHUB_REF_NAME}-windows-x64.exe"
           else
             cp tools/42-logirev.rules "$dir/tools/"
-            tar czf "$dir.tar.gz" "$dir"
-            echo "ASSET=$dir.tar.gz" >> "$GITHUB_ENV"
+            tar czf "out/$dir.tar.gz" "$dir"
           fi
 
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}
-          path: ${{ env.ASSET }}
+          path: out/*
           if-no-files-found: error
 
   publish:

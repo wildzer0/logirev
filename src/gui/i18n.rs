@@ -306,6 +306,23 @@ texts! {
     saved => "Saved", "Salvato";
     save_error => "Not saved: {}", "Non salvato: {}";
 
+    // Updates
+    updates => "Updates", "Aggiornamenti";
+    check_updates_auto => "Check for updates automatically (asks GitHub once a day)",
+        "Controlla automaticamente gli aggiornamenti (chiede a GitHub una volta al giorno)";
+    current_version => "Installed version: {}", "Versione installata: {}";
+    check_now => "Check now", "Controlla ora";
+    checking => "Checking...", "Controllo in corso...";
+    up_to_date => "logirev is up to date.", "logirev è aggiornato.";
+    update_available => "Version {} is available.", "È disponibile la versione {}.";
+    update_now => "Update now", "Aggiorna ora";
+    update_later => "Later", "Più tardi";
+    updating => "Downloading and installing...", "Download e installazione in corso...";
+    update_failed => "Update failed: {}", "Aggiornamento non riuscito: {}";
+    whats_new => "What's new", "Novità";
+    download_page => "Open the download page", "Apri la pagina di download";
+    restarting => "Updated. Restarting logirev...", "Aggiornato. Riavvio di logirev...";
+
     // About page
     about_text => "A small, portable app that configures Logitech mice, trackballs and keyboards — without Logi Options+.",
         "Una piccola app portatile che configura mouse, trackball e tastiere Logitech, senza Logi Options+.";

@@ -29,10 +29,21 @@ const TITLE: &str = "logirev";
 
 /// Opens the settings window and returns when it is closed.
 pub fn run(opts: &ServiceOptions) -> ExitCode {
-    let Ok(_guard) = crate::instance::acquire_named("logirev-settings") else {
-        focus_existing_window();
-        return ExitCode::SUCCESS;
+    // After an update the old window may still be closing: wait for it.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let _guard = loop {
+        match crate::instance::acquire_named("logirev-settings") {
+            Ok(g) => break g,
+            Err(_) if opts.after_update && std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
+            Err(_) => {
+                focus_existing_window();
+                return ExitCode::SUCCESS;
+            }
+        }
     };
+    crate::update::cleanup_old_files();
     let custom = opts.config.is_some();
     let config_path: PathBuf = opts.config.clone().unwrap_or_else(default_config_path);
 

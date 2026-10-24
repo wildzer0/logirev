@@ -17,6 +17,11 @@ All notable changes are listed here. Versions follow
 - New application icon (stylised trackball), also embedded in the `.exe`.
 - Local channel between the service and the window (127.0.0.1 + secret).
 - `--background` flag (used by *Start with Windows*: no window at log-in).
+- **Automatic updates** from GitHub releases: daily check by the service
+  (notification), check on opening the window, *Update now* downloads the
+  new `logirev.exe` / `logirevctl.exe`, verifies them against
+  `SHA256SUMS.txt`, replaces them and restarts. `[general] check_updates`
+  turns the check off. Releases now also publish the bare `.exe` files.
 - Demo mode for the window (`LOGIREV_DEMO=1`), used for screenshots.
 
 ### Changed

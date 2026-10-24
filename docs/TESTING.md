@@ -133,6 +133,21 @@ Change buttons one at a time (save after each) and try them.
 | L14 | Task Manager | `logirev.exe` (service) a few MB; the window process exits when closed. |
 | L15 | Explorer | `logirev.exe` shows the new round blue icon. |
 
+## M. Updates
+
+To test, run a build whose version in `Cargo.toml` is *lower* than the
+latest published release (e.g. set `version = "0.9.0"` locally).
+
+| # | Do | Expect |
+|---|---|---|
+| M1 | Open the window | *Devices* shows "Version X is available" with *Update now* / *Later*. |
+| M2 | Wait ~1 minute with the window closed | A notification "Update available". |
+| M3 | *Settings → Updates → What's new* | The release notes. |
+| M4 | *Update now* | "Downloading and installing...", then the window closes and reopens; the tray icon comes back; *About* shows the new version. |
+| M5 | Explorer, logirev folder | `logirev.exe` replaced; `logirev.exe.old` disappears at the next start. |
+| M6 | Untick *Check for updates automatically* | No more update notifications; *Check now* still works. |
+| M7 | Read-only folder (e.g. under `C:\Program Files`) | *Update now* fails with a clear message; the old version keeps working. |
+
 ## J. Command-line tools
 
 | # | Do | Expect |

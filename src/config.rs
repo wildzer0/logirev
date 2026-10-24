@@ -79,6 +79,8 @@ pub struct General {
     pub language: String,
     /// Settings window theme: `system`, `light`, `dark`.
     pub theme: String,
+    /// Look for a newer version on GitHub (once a day).
+    pub check_updates: bool,
 }
 
 impl Default for General {
@@ -88,6 +90,7 @@ impl Default for General {
             battery_warning: 15,
             language: "auto".into(),
             theme: "system".into(),
+            check_updates: true,
         }
     }
 }

@@ -10,6 +10,7 @@
 //! so customising one device never changes another.
 
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use eframe::egui::{
@@ -29,6 +30,7 @@ use crate::hidpp::frame::RECEIVER_INDEX;
 use crate::input::keys::MouseButton;
 use crate::ipc::{Client, ToService};
 use crate::status::{DeviceStatus, LinkStatus, Snapshot};
+use crate::update::{self, Release};
 
 /// Wait after the last edit before saving.
 const SAVE_DELAY: Duration = Duration::from_millis(600);
@@ -51,6 +53,19 @@ enum Tab {
     Keyboard,
     Programs,
     Computers,
+}
+
+/// Progress of the update check / installation (shared with the worker
+/// thread).
+#[derive(Clone)]
+enum UpdateStatus {
+    Idle,
+    Checking,
+    UpToDate,
+    Available(Box<Release>),
+    Installing,
+    Installed,
+    Failed(String),
 }
 
 enum SaveState {
@@ -94,6 +109,11 @@ pub struct SettingsApp {
     /// Demo mode (`LOGIREV_DEMO=1`): sample devices, nothing is saved.
     /// Used for screenshots and to try the interface without hardware.
     demo: bool,
+    update: Arc<Mutex<UpdateStatus>>,
+    /// The update banner was dismissed for this session.
+    update_dismissed: bool,
+    /// An update was installed and the restart has been started.
+    restarting: bool,
 }
 
 impl SettingsApp {
@@ -135,6 +155,9 @@ impl SettingsApp {
             exe: std::env::current_exe().unwrap_or_default(),
             custom_config,
             demo: std::env::var_os("LOGIREV_DEMO").is_some(),
+            update: Arc::new(Mutex::new(UpdateStatus::Idle)),
+            update_dismissed: false,
+            restarting: false,
         };
         let mut app = app;
         if app.demo {
@@ -170,7 +193,157 @@ impl SettingsApp {
             }
         }
         app.apply_theme(&cc.egui_ctx);
+        if app.raw.general.check_updates && !app.demo {
+            app.check_for_update(&cc.egui_ctx);
+        }
+        if app.demo {
+            let release = Release {
+                tag_name: "v1.1.0".into(),
+                html_url: env!("CARGO_PKG_REPOSITORY").into(),
+                body: "- Example release notes\n- Shown in demo mode only".into(),
+                assets: Vec::new(),
+            };
+            Self::set_update(&app.update, UpdateStatus::Available(Box::new(release)));
+        }
         app
+    }
+
+    fn update_status(&self) -> UpdateStatus {
+        self.update
+            .lock()
+            .map(|s| s.clone())
+            .unwrap_or(UpdateStatus::Idle)
+    }
+
+    fn set_update(status: &Arc<Mutex<UpdateStatus>>, value: UpdateStatus) {
+        if let Ok(mut s) = status.lock() {
+            *s = value;
+        }
+    }
+
+    /// Asks GitHub for a newer version, in the background.
+    fn check_for_update(&self, ctx: &egui::Context) {
+        let (status, repaint) = (Arc::clone(&self.update), ctx.clone());
+        Self::set_update(&status, UpdateStatus::Checking);
+        std::thread::spawn(move || {
+            let result = match update::check() {
+                Ok(Some(release)) => UpdateStatus::Available(Box::new(release)),
+                Ok(None) => UpdateStatus::UpToDate,
+                Err(e) => UpdateStatus::Failed(e),
+            };
+            Self::set_update(&status, result);
+            repaint.request_repaint();
+        });
+    }
+
+    /// Downloads and installs `release` in the background.
+    fn install_update(&self, ctx: &egui::Context, release: Release) {
+        let (status, repaint) = (Arc::clone(&self.update), ctx.clone());
+        Self::set_update(&status, UpdateStatus::Installing);
+        std::thread::spawn(move || {
+            let result = match update::install(&release) {
+                Ok(()) => UpdateStatus::Installed,
+                Err(e) => UpdateStatus::Failed(e),
+            };
+            Self::set_update(&status, result);
+            repaint.request_repaint();
+        });
+    }
+
+    /// After installing: stop the old service, start the new version (which
+    /// waits for the old one to exit and reopens this window), and close.
+    fn restart_after_update(&mut self, ctx: &egui::Context) {
+        self.restarting = true;
+        self.send(ToService::Quit);
+        let mut cmd = std::process::Command::new(&self.exe);
+        cmd.arg("--after-update");
+        if self.custom_config {
+            cmd.arg("--config").arg(&self.config_path);
+        }
+        if let Err(e) = cmd.spawn() {
+            log::warn!("cannot restart logirev: {e}");
+        }
+        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+    }
+
+    /// The "updates" card of the settings page.
+    fn updates_ui(&mut self, ui: &mut Ui) {
+        let t = self.t;
+        let pal = palette(ui.visuals().dark_mode);
+        let mut auto = self.raw.general.check_updates;
+        if ui.checkbox(&mut auto, t.check_updates_auto).changed() {
+            self.raw.general.check_updates = auto;
+            self.changed();
+        }
+        ui.label(
+            RichText::new(fill(t.current_version, &[env!("CARGO_PKG_VERSION")])).color(pal.muted),
+        );
+        let status = self.update_status();
+        match &status {
+            UpdateStatus::Idle => {}
+            UpdateStatus::Checking => {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(t.checking);
+                });
+            }
+            UpdateStatus::UpToDate => {
+                ui.label(RichText::new(format!("{} {}", icon::CHECK, t.up_to_date)).color(GOOD));
+            }
+            UpdateStatus::Available(r) => self.release_ui(ui, r),
+            UpdateStatus::Installing => {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(t.updating);
+                });
+            }
+            UpdateStatus::Installed => {
+                ui.label(RichText::new(t.restarting).color(GOOD));
+            }
+            UpdateStatus::Failed(e) => {
+                ui.label(RichText::new(fill(t.update_failed, &[e])).color(BAD));
+            }
+        }
+        let busy = matches!(
+            status,
+            UpdateStatus::Checking | UpdateStatus::Installing | UpdateStatus::Installed
+        );
+        if ui
+            .add_enabled(
+                !busy,
+                egui::Button::new(format!("{} {}", icon::ARROWS_CLOCKWISE, t.check_now)),
+            )
+            .clicked()
+        {
+            self.check_for_update(ui.ctx());
+        }
+    }
+
+    /// "Version X is available" with notes and the install button.
+    fn release_ui(&mut self, ui: &mut Ui, release: &Release) {
+        let t = self.t;
+        ui.label(
+            RichText::new(fill(t.update_available, &[release.version()]))
+                .strong()
+                .color(ACCENT),
+        );
+        ui.horizontal(|ui| {
+            if update::can_install() {
+                let button = egui::Button::new(RichText::new(t.update_now).color(Color32::WHITE))
+                    .fill(ACCENT);
+                if ui.add(button).clicked() {
+                    self.install_update(ui.ctx(), release.clone());
+                }
+            }
+            ui.hyperlink_to(t.download_page, &release.html_url);
+        });
+        if !release.body.trim().is_empty() {
+            egui::CollapsingHeader::new(t.whats_new)
+                .id_salt("notes")
+                .show(ui, |ui| {
+                    ui.add(egui::Label::new(release.body.trim()).wrap());
+                });
+        }
     }
 
     fn apply_theme(&self, ctx: &egui::Context) {
@@ -200,6 +373,9 @@ impl SettingsApp {
     // ------------------------------------------------------------------
 
     fn tick(&mut self, ctx: &egui::Context) {
+        if !self.restarting && matches!(self.update_status(), UpdateStatus::Installed) {
+            self.restart_after_update(ctx);
+        }
         if self.demo {
             self.dirty_at = None;
             return;
@@ -388,6 +564,48 @@ impl SettingsApp {
         ui.label(RichText::new(t.devices_title).size(28.0).strong());
         ui.label(RichText::new(t.devices_subtitle).color(pal.muted));
         ui.add_space(12.0);
+
+        if let UpdateStatus::Available(release) = self.update_status() {
+            if !self.update_dismissed {
+                Frame::new()
+                    .fill(ACCENT.gamma_multiply(0.15))
+                    .stroke(Stroke::new(1.0, ACCENT))
+                    .corner_radius(CornerRadius::same(12))
+                    .inner_margin(Margin::same(14))
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new(icon::ARROWS_CLOCKWISE)
+                                    .size(22.0)
+                                    .color(ACCENT),
+                            );
+                            ui.label(
+                                RichText::new(fill(t.update_available, &[release.version()]))
+                                    .strong(),
+                            );
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if ui.button(t.update_later).clicked() {
+                                    self.update_dismissed = true;
+                                }
+                                if update::can_install() {
+                                    let b = egui::Button::new(
+                                        RichText::new(t.update_now).color(Color32::WHITE),
+                                    )
+                                    .fill(ACCENT);
+                                    if ui.add(b).clicked() {
+                                        self.install_update(ui.ctx(), *release.clone());
+                                        self.page = Page::Settings;
+                                    }
+                                } else {
+                                    ui.hyperlink_to(t.download_page, &release.html_url);
+                                }
+                            });
+                        });
+                    });
+                ui.add_space(12.0);
+            }
+        }
 
         if !self.connected() {
             empty_state(ui, icon::POWER, t.service_stopped, t.service_stopped_hint);
@@ -1264,6 +1482,14 @@ impl SettingsApp {
                     }
                 }
             },
+        );
+
+        section(
+            ui,
+            pal.card,
+            pal.border,
+            &format!("{}  {}", icon::ARROWS_CLOCKWISE, t.updates),
+            |ui| self.updates_ui(ui),
         );
 
         section(

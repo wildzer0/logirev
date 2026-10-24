@@ -23,6 +23,9 @@ product_id = "auto"
 # Show a notification when a battery drops to this percentage (0 = never).
 battery_warning = 15
 
+# Look for a new version of logirev on GitHub once a day (true / false).
+check_updates = true
+
 # -----------------------------------------------------------------------------
 #  Logging
 # -----------------------------------------------------------------------------

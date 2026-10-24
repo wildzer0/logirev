@@ -25,8 +25,11 @@ cable or Bluetooth. It was built and tested with an **MX Ergo S** trackball.
 - **Plug & play** — devices are set up the moment they connect or wake up.
 - **Light** — the background part uses just a few MB of memory and no
   CPU while idle; the window only runs while it is open.
-- **Portable and private** — no installation, no account, no internet, no
-  telemetry. Works from a USB stick. English and Italian.
+- **Updates itself** — when a new version is out, one click installs it.
+- **Portable and private** — no installation, no account, no telemetry.
+  The only time it goes online is the update check (once a day, nothing
+  about you is sent; it can be turned off). Works from a USB stick. English
+  and Italian.
 
 | Customise a device | Change a button |
 |---|---|
@@ -82,7 +85,14 @@ double-clicking `logirev.exe` again).
 - **Macros** — lists of steps (shortcuts, text, clicks, pauses) that a
   button can run.
 - **Settings** — language, light or dark look, *Start with Windows*,
-  battery warning.
+  battery warning, **updates**.
+
+**Updates:** logirev looks for a new version once a day. When there is one,
+a notification appears and the app shows *Version X is available* with an
+**Update now** button: logirev downloads the new version from this
+project's GitHub page, checks that the files are intact, replaces itself and
+restarts — your settings stay as they are. You can turn the check off, or
+check by hand, in *Settings → Updates*.
 
 Changes are **saved and applied immediately**; there is no "save" button.
 Closing the window does not stop logirev: the icon next to the clock keeps

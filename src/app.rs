@@ -35,6 +35,8 @@ pub struct ServiceOptions {
     pub pcap: Option<PathBuf>,
     /// Started automatically (at log-in): do not open the settings window.
     pub background: bool,
+    /// Restarting after an update: wait for the previous copy to exit.
+    pub after_update: bool,
 }
 
 /// Everything the daemon needs, ready to go.
@@ -62,6 +64,7 @@ pub fn default_config_path() -> PathBuf {
 /// `console` — also print log lines on standard error (false for the tray
 /// program, which has no console).
 pub fn prepare(opts: &ServiceOptions, console: bool) -> Result<Prepared, String> {
+    crate::update::cleanup_old_files();
     let config_path = opts.config.clone().unwrap_or_else(default_config_path);
     if !config_path.exists() {
         std::fs::write(&config_path, config::TEMPLATE)
@@ -81,7 +84,7 @@ pub fn prepare(opts: &ServiceOptions, console: bool) -> Result<Prepared, String>
     )
     .map_err(|e| format!("cannot open log file: {e}"))?;
 
-    let instance = instance::acquire().map_err(|e| format!("{e}"))?;
+    let instance = acquire_instance(opts.after_update)?;
     info!(
         "logirev {} starting, configuration {}",
         env!("CARGO_PKG_VERSION"),
@@ -102,6 +105,21 @@ pub fn prepare(opts: &ServiceOptions, console: bool) -> Result<Prepared, String>
     })
 }
 
+/// Takes the single-instance lock. After an update the previous copy may
+/// still be shutting down, so wait for it (up to 15 seconds).
+fn acquire_instance(after_update: bool) -> Result<InstanceGuard, String> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        match instance::acquire() {
+            Ok(g) => return Ok(g),
+            Err(_) if after_update && std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(300));
+            }
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+}
+
 /// Runs the background service in the terminal until Ctrl+C.
 pub fn run_service(opts: &ServiceOptions) -> Result<(), String> {
     let p = prepare(opts, true)?;
@@ -112,6 +130,9 @@ pub fn run_service(opts: &ServiceOptions) -> Result<(), String> {
     })
     .map_err(|e| format!("cannot install Ctrl+C handler: {e}"))?;
     crate::foreground::watch(tx.clone());
+    if p.cfg.general.check_updates {
+        crate::update::spawn_checker(tx.clone());
+    }
     let ipc = start_ipc(&tx);
     let hooks = ipc.clone().map(|server| UiHooks {
         observer: Box::new(move |update| server.publish(&update)),

@@ -47,6 +47,10 @@ struct Cli {
     /// Start without opening the settings window (used at log-in)
     #[arg(long)]
     background: bool,
+
+    /// Restart after an update (waits for the previous copy to exit)
+    #[arg(long, hide = true)]
+    after_update: bool,
 }
 
 /// Opens the settings window, if this build has one.
@@ -68,6 +72,7 @@ impl Cli {
             log_level: self.log_level,
             pcap: self.pcap,
             background: self.background,
+            after_update: self.after_update,
         }
     }
 }

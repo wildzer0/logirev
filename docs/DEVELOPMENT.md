@@ -151,8 +151,11 @@ their features are discovered at runtime. To support a new setting:
 3. The **Release** workflow (`.github/workflows/release.yml`) checks that the
    tag matches `Cargo.toml`, builds Windows (`x86_64-pc-windows-msvc`) and
    Linux (`x86_64-unknown-linux-musl`, static), and publishes
-   `logirev-<tag>-windows-x64.zip`, `logirev-<tag>-linux-x64.tar.gz` and
-   `SHA256SUMS.txt` on the Releases page. Tags containing `-` (e.g.
+   `logirev-<tag>-windows-x64.zip`, `logirev-<tag>-linux-x64.tar.gz`, the
+   bare `logirev-<tag>-windows-x64.exe` / `logirevctl-<tag>-windows-x64.exe`
+   (downloaded by the automatic updater, `src/update.rs`) and
+   `SHA256SUMS.txt` (the updater refuses files whose hash does not match) on
+   the Releases page. The updater only sees *non*-pre-releases. Tags containing `-` (e.g.
    `v0.3.0-beta.1`) are published as pre-releases.
 
 The **CI** workflow (`.github/workflows/ci.yml`) runs formatting, lints and

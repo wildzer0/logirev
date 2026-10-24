@@ -79,6 +79,7 @@ fn main() -> ExitCode {
             log_level: cli.log_level.clone(),
             pcap: cli.pcap.clone(),
             background: true,
+            after_update: false,
         }),
         Cmd::Scan => console_logging(&cli).and_then(|()| cmd_scan(&cli, &config_path)),
         Cmd::List => console_logging(&cli).and_then(|()| cmd_list()),

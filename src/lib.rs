@@ -22,6 +22,9 @@
 //! | [`foreground`] | which program is in front (per-application buttons) |
 //! | [`icon`] | the application icon, drawn in code |
 //! | `gui` | the settings window (feature `gui`) |
+//! | [`http`] | HTTPS downloads (WinHTTP / curl) for updates |
+//! | [`update`] | update check and installation from GitHub releases |
+//! | [`sha256`] | checksum of downloaded updates |
 //! | [`hidpp`] | the HID++ protocol: wire format, transport, features, receivers |
 //! | [`input`] | synthetic keyboard/mouse input |
 //! | [`instance`] | single-instance lock |
@@ -42,6 +45,7 @@ pub mod foreground;
 #[cfg(feature = "gui")]
 pub mod gui;
 pub mod hidpp;
+pub mod http;
 pub mod icon;
 pub mod input;
 pub mod instance;
@@ -49,5 +53,7 @@ pub mod ipc;
 pub mod logging;
 pub mod pcap;
 pub mod service;
+pub mod sha256;
 pub mod status;
 pub mod ui;
+pub mod update;
