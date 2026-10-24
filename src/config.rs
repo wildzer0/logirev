@@ -73,7 +73,7 @@ pub struct RawMacro {
 }
 
 /// `[general]` section.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct General {
     /// Product id of the receiver/device to use (e.g. `"c548"`); empty = auto.
@@ -89,6 +89,16 @@ pub struct General {
     /// Developer mode: technical details and live HID++ messages in the
     /// settings window.
     pub developer: bool,
+    /// Show a short message on screen when the DPI, precision mode,
+    /// computer or backlight changes from a button.
+    pub osd: bool,
+    /// Show the lowest battery level on the tray icon.
+    pub tray_battery: bool,
+    /// Wheel speed for every mouse (Windows): 1.0 = unchanged, 2.0 = twice
+    /// as far per notch, 0.5 = half.
+    pub scroll_speed: f32,
+    /// Scroll smoothly instead of in steps (Windows, every mouse).
+    pub smooth_scrolling: bool,
 }
 
 impl Default for General {
@@ -100,6 +110,10 @@ impl Default for General {
             theme: "system".into(),
             check_updates: true,
             developer: false,
+            osd: true,
+            tray_battery: true,
+            scroll_speed: 1.0,
+            smooth_scrolling: false,
         }
     }
 }
@@ -656,6 +670,9 @@ impl Config {
         level_filter(&raw.logging.level)?;
         if raw.general.battery_warning > 100 {
             return Err("battery_warning must be between 0 and 100".into());
+        }
+        if !(0.25..=5.0).contains(&raw.general.scroll_speed) {
+            return Err("scroll_speed must be between 0.25 and 5".into());
         }
         let mut macros = BTreeMap::new();
         for (name, m) in raw.macros {

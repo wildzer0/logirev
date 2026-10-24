@@ -14,10 +14,10 @@ pub enum Lang {
 impl Lang {
     /// From the `[general] language` setting (`auto` follows the system).
     pub fn from_setting(setting: &str) -> Self {
-        match setting {
-            "it" => Self::It,
-            "en" => Self::En,
-            _ => system_language(),
+        if crate::locale::italian(setting) {
+            Self::It
+        } else {
+            Self::En
         }
     }
 
@@ -25,32 +25,6 @@ impl Lang {
         match self {
             Self::En => &EN,
             Self::It => &IT,
-        }
-    }
-}
-
-/// The user's language as configured in the operating system.
-fn system_language() -> Lang {
-    #[cfg(windows)]
-    {
-        // SAFETY: plain query without arguments.
-        let lang = unsafe { windows_sys::Win32::Globalization::GetUserDefaultUILanguage() };
-        // Primary language id 0x10 = Italian.
-        if lang & 0x3FF == 0x10 {
-            return Lang::It;
-        }
-        Lang::En
-    }
-    #[cfg(not(windows))]
-    {
-        let env = ["LC_ALL", "LC_MESSAGES", "LANG"]
-            .iter()
-            .find_map(|v| std::env::var(v).ok().filter(|s| !s.is_empty()))
-            .unwrap_or_default();
-        if env.starts_with("it") {
-            Lang::It
-        } else {
-            Lang::En
         }
     }
 }
@@ -152,7 +126,6 @@ texts! {
     tab_programs => "Per program", "Per programma";
     tab_computers => "Computers", "Computer";
     firmware => "Firmware {}", "Firmware {}";
-    battery => "Battery", "Batteria";
     device_gone => "This device is no longer connected.", "Questa periferica non è più connessa.";
 
     // Button names
@@ -239,6 +212,26 @@ texts! {
     act_custom => "Custom (set in the file)", "Personalizzata (nel file)";
     current_action => "Now: {}", "Ora: {}";
     tab_tech => "Technical", "Tecnico";
+    battery_and_messages => "Battery and messages", "Batteria e avvisi";
+    tray_battery => "Show the battery level on the tray icon", "Mostra il livello della batteria sull'icona vicino all'orologio";
+    osd_on => "Show changes on screen", "Mostra le modifiche sullo schermo";
+    osd_hint => "A short message when a button changes the DPI, the precision mode, the computer or the backlight.",
+        "Un breve messaggio quando un tasto cambia i DPI, la modalità precisione, il computer o la retroilluminazione.";
+    wheel_all => "Scrolling", "Scorrimento";
+    wheel_all_hint => "Applies to every mouse connected to this computer.",
+        "Vale per tutti i mouse collegati a questo computer.";
+    scroll_speed => "Scrolling speed", "Velocità di scorrimento";
+    normal => "Normal", "Normale";
+    smooth_scrolling => "Smooth scrolling", "Scorrimento fluido";
+    backup => "Backup", "Backup";
+    backup_hint => "Save all your settings to a file, or load them back (also on another computer).",
+        "Salva tutte le impostazioni in un file, o ricaricale (anche su un altro computer).";
+    export_settings => "Export settings...", "Esporta impostazioni...";
+    import_settings => "Import settings...", "Importa impostazioni...";
+    exported => "Settings exported", "Impostazioni esportate";
+    imported => "Settings imported and applied", "Impostazioni importate e applicate";
+    settings_file_is => "Your settings are in {}: copy that file to keep them.",
+        "Le impostazioni sono in {}: copia quel file per conservarle.";
     developer => "Developer mode", "Modalità sviluppatore";
     developer_on => "Show technical details", "Mostra i dettagli tecnici";
     developer_hint => "Adds a \"Technical\" tab to each device: identity, firmware components, every feature (hidden ones included) and the live HID++ messages. Everything is read-only.",

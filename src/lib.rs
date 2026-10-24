@@ -73,6 +73,7 @@ pub mod icon;
 pub mod input;
 pub mod instance;
 pub mod ipc;
+pub mod locale;
 pub mod logging;
 pub mod pcap;
 pub mod service;

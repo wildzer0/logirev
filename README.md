@@ -181,6 +181,11 @@ advanced diagnostics there is `logirevctl.exe`, a command-line tool:
 `logirevctl run --log-level debug --pcap logirev.pcap` records the traffic
 for Wireshark (quit logirev first).
 
+**Other options** (*Settings*): a short message on screen when a button
+changes the DPI, precision mode or computer; the battery level on the tray
+icon and a notification when charging is complete; wheel speed and smooth
+scrolling for every mouse; export and import of all your settings.
+
 **Developer mode** (*Settings → Developer mode*) adds a *Technical* tab to
 each device: serial number, firmware components, every feature (including
 the ones Logitech keeps hidden) and the HID++ messages as they happen, with

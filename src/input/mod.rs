@@ -9,6 +9,7 @@
 //!   (works on X11 and Wayland; needs write access to `/dev/uinput`).
 
 pub mod keys;
+pub mod wheel;
 
 #[cfg(target_os = "linux")]
 mod linux;

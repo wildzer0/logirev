@@ -24,6 +24,8 @@
 // is not built in.
 #[cfg(not(feature = "gui"))]
 mod devices;
+mod osd;
+mod scroll;
 mod tray;
 mod util;
 
@@ -73,6 +75,9 @@ type Queue = Arc<Mutex<VecDeque<UiUpdate>>>;
 struct State {
     hwnd: HWND,
     tray: Tray,
+    osd: Option<osd::Osd>,
+    /// Show the battery on the tray icon.
+    tray_battery: bool,
     #[cfg(not(feature = "gui"))]
     devices: Option<DevicesWindow>,
     snapshot: Snapshot,
@@ -193,13 +198,15 @@ fn start(p: Prepared, opts: &ServiceOptions) -> Result<(), String> {
 
     let tray = Tray::new(hwnd, WM_APP_TRAY);
     #[cfg(not(feature = "gui"))]
-    let devices = DevicesWindow::create(instance, tray.icon());
+    let devices = DevicesWindow::create(instance, tray.app_icon());
     #[cfg(not(feature = "gui"))]
     if devices.is_none() {
         warn!("cannot create the devices window");
     }
-    #[cfg(feature = "gui")]
-    let _ = instance;
+    let osd = osd::Osd::create(instance);
+    if osd.is_none() {
+        warn!("cannot create the on-screen message window");
+    }
     register_device_notifications(hwnd);
     // SAFETY: NUL-terminated string.
     let taskbar_created = unsafe { RegisterWindowMessageW(util::wide("TaskbarCreated").as_ptr()) };
@@ -257,6 +264,8 @@ fn start(p: Prepared, opts: &ServiceOptions) -> Result<(), String> {
         *s.borrow_mut() = Some(State {
             hwnd,
             tray,
+            osd,
+            tray_battery: true,
             #[cfg(not(feature = "gui"))]
             devices,
             snapshot: Snapshot::default(),
@@ -389,6 +398,8 @@ fn drain_updates() {
             match update {
                 UiUpdate::Snapshot(snap) => {
                     s.tray.set_tip(&snap.tooltip());
+                    let battery = s.tray_battery.then(|| lowest_battery(&snap)).flatten();
+                    s.tray.set_battery(battery);
                     #[cfg(not(feature = "gui"))]
                     if let Some(w) = &s.devices {
                         w.update(&snap);
@@ -397,6 +408,20 @@ fn drain_updates() {
                 }
                 UiUpdate::Notice { title, text } => s.tray.notify(&title, &text, true),
                 UiUpdate::Stopped(err) => stopped = Some(err),
+                UiUpdate::Osd(text) => {
+                    if let Some(o) = &s.osd {
+                        o.show(&text);
+                    }
+                }
+                UiUpdate::Preferences(p) => {
+                    s.tray_battery = p.tray_battery;
+                    let battery = p
+                        .tray_battery
+                        .then(|| lowest_battery(&s.snapshot))
+                        .flatten();
+                    s.tray.set_battery(battery);
+                    scroll::configure(p.scroll_percent, p.smooth_scrolling);
+                }
             }
         }
         stopped.map(|err| {
@@ -415,6 +440,16 @@ fn drain_updates() {
         // SAFETY: our own window.
         unsafe { DestroyWindow(hwnd) };
     }
+}
+
+/// The lowest battery among connected devices: `(percent, charging)`.
+fn lowest_battery(snap: &Snapshot) -> Option<(u8, bool)> {
+    snap.links
+        .iter()
+        .flat_map(|l| &l.devices)
+        .filter(|d| d.online)
+        .filter_map(|d| d.battery_level)
+        .min_by_key(|(p, _)| *p)
 }
 
 fn show_menu(hwnd: HWND) {

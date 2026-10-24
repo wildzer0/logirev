@@ -56,6 +56,10 @@ match = { kind = "mouse" }
 |---|---|---|
 | `product_id` | `"auto"` uses every Logitech receiver and device found. Write a USB product id (e.g. `"c548"` = Bolt, `"c52b"` = Unifying) to use only that kind. | `"auto"` |
 | `check_updates` | look for a new version on GitHub once a day (`true` / `false`) | `true` |
+| `osd` | show a short message on screen when a button changes the DPI, precision mode, computer or backlight (Windows) | `true` |
+| `tray_battery` | show the lowest battery level as a bar on the tray icon (Windows) | `true` |
+| `scroll_speed` | wheel speed for every mouse, from `0.25` to `5` (`1.0` = normal) (Windows) | `1.0` |
+| `smooth_scrolling` | scroll smoothly instead of in steps, every mouse (Windows) | `false` |
 | `developer` | developer mode: a *Technical* tab on every device (identity, firmware components, features, live HID++ messages) (`true` / `false`) | `false` |
 | `language` | settings window language: `"auto"`, `"en"`, `"it"` | `"auto"` |
 | `theme` | settings window look: `"system"`, `"light"`, `"dark"` | `"system"` |

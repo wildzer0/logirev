@@ -3,6 +3,24 @@
 All notable changes are listed here. Versions follow
 [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Added
+- **On-screen messages**: a short message at the bottom of the screen when
+  a button changes the DPI, precision mode, computer or keyboard backlight
+  (`[general] osd`).
+- **Battery on the tray icon**: a coloured bar with the lowest battery
+  level (`tray_battery`), and a notification when charging is complete.
+- **Scrolling** for every mouse (Windows): wheel speed and smooth scrolling
+  (`scroll_speed`, `smooth_scrolling`).
+- **Backup**: export and import all settings from the settings window.
+
+### Changed
+- Battery and on-screen notifications follow the interface language.
+
+### Fixed
+- Turning developer mode on or off in the settings window is now saved.
+
 ## [1.2.0] — 2026-10-24
 
 ### Added

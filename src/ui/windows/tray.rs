@@ -26,7 +26,13 @@ const ICON_ID: u32 = 1;
 pub struct Tray {
     hwnd: HWND,
     callback: u32,
+    /// The icon shown now.
     icon: HICON,
+    /// The plain icon (also used by windows); `icon` may equal it.
+    plain: HICON,
+    size: i32,
+    /// Battery shown on the icon (rounded), `None` = plain icon.
+    battery: Option<(u8, bool)>,
 }
 
 impl Tray {
@@ -34,10 +40,14 @@ impl Tray {
     pub fn new(hwnd: HWND, callback: u32) -> Self {
         // SAFETY: plain metric query.
         let size = unsafe { GetSystemMetrics(SM_CXSMICON) }.clamp(16, 64);
+        let plain = make_icon(&crate::icon::draw_rgba(size as u32), size);
         let tray = Self {
             hwnd,
             callback,
-            icon: make_icon(size),
+            icon: plain,
+            plain,
+            size,
+            battery: None,
         };
         tray.add();
         tray
@@ -45,8 +55,8 @@ impl Tray {
 
     /// The application icon (also used for windows).
     #[cfg(not(feature = "gui"))]
-    pub fn icon(&self) -> HICON {
-        self.icon
+    pub fn app_icon(&self) -> HICON {
+        self.plain
     }
 
     fn data(&self) -> NOTIFYICONDATAW {
@@ -78,6 +88,38 @@ impl Tray {
         unsafe { Shell_NotifyIconW(NIM_MODIFY, &d) };
     }
 
+    /// Shows `battery` (percent, charging) on the icon, or the plain icon.
+    pub fn set_battery(&mut self, battery: Option<(u8, bool)>) {
+        // Steps of 10 %: no need to redraw for every percent.
+        let battery = battery.map(|(p, c)| (p.min(100).div_ceil(10) * 10, c));
+        if battery == self.battery {
+            return;
+        }
+        let icon = match battery {
+            Some((p, c)) => make_icon(
+                &crate::icon::draw_with_battery(self.size as u32, p, c),
+                self.size,
+            ),
+            None => self.plain,
+        };
+        if icon.is_null() {
+            return;
+        }
+        let mut d = self.data();
+        d.uFlags = NIF_ICON;
+        d.hIcon = icon;
+        // SAFETY: `d` is fully initialised; the old icon is destroyed only
+        // after the shell has the new one.
+        unsafe {
+            Shell_NotifyIconW(NIM_MODIFY, &d);
+            if self.icon != self.plain {
+                DestroyIcon(self.icon);
+            }
+        }
+        self.icon = icon;
+        self.battery = battery;
+    }
+
     /// Shows a notification next to the icon (a toast on Windows 10/11).
     pub fn notify(&self, title: &str, text: &str, warning: bool) {
         let mut d = self.data();
@@ -99,8 +141,13 @@ impl Tray {
 impl Drop for Tray {
     fn drop(&mut self) {
         self.remove();
-        // SAFETY: the icon was created by `make_icon` and is owned by us.
-        unsafe { DestroyIcon(self.icon) };
+        // SAFETY: the icons were created by `make_icon` and are owned by us.
+        unsafe {
+            if self.icon != self.plain {
+                DestroyIcon(self.icon);
+            }
+            DestroyIcon(self.plain);
+        }
     }
 }
 
@@ -174,10 +221,9 @@ pub fn show_menu(hwnd: HWND, entries: &[MenuEntry]) -> Option<usize> {
     }
 }
 
-/// Builds an icon handle from [`crate::icon::draw_rgba`] at the size the
-/// notification area uses.
-fn make_icon(size: i32) -> HICON {
-    let rgba = crate::icon::draw_rgba(size as u32);
+/// Builds an icon handle from `size`×`size` RGBA pixels (see
+/// [`crate::icon`]).
+fn make_icon(rgba: &[u8], size: i32) -> HICON {
     // Windows wants BGRA.
     let pixels: Vec<u8> = rgba
         .as_chunks::<4>()

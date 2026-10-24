@@ -86,7 +86,6 @@ pub mod icon {
     pub const PAUSE: &str = "\u{E39E}";
     pub const PLAY: &str = "\u{E3D0}";
     pub const CLIPBOARD_TEXT: &str = "\u{E198}";
-    #[cfg_attr(not(windows), allow(dead_code))]
     pub const FLOPPY_DISK: &str = "\u{E248}";
 }
 

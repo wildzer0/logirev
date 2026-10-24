@@ -77,6 +77,42 @@ pub fn draw_rgba(size: u32) -> Vec<u8> {
         .collect()
 }
 
+/// The icon with a battery gauge along the bottom edge (tray icon).
+///
+/// The bar is green above 50 %, amber above 20 %, red below; while
+/// charging it is cyan.
+pub fn draw_with_battery(size: u32, percent: u8, charging: bool) -> Vec<u8> {
+    let mut px = draw_rgba(size);
+    let s = size as f32;
+    let height = (s * 0.22).round().max(4.0) as u32;
+    let top = size - height;
+    let fill = match (charging, percent) {
+        (true, _) => [34, 211, 238],
+        (false, 51..) => [22, 163, 74],
+        (false, 21..) => [217, 119, 6],
+        (false, _) => [220, 38, 38],
+    };
+    let border = 1u32;
+    let inner = size - 2 * border;
+    let filled = (f32::from(percent.min(100)) / 100.0 * inner as f32).round() as u32;
+    for y in top..size {
+        for x in 0..size {
+            let i = ((y * size + x) * 4) as usize;
+            let edge = y == top || y == size - 1 || x < border || x >= size - border;
+            let color = if edge {
+                [15, 23, 42]
+            } else if x - border < filled.max(1) {
+                fill
+            } else {
+                [51, 65, 85]
+            };
+            px[i..i + 3].copy_from_slice(&color);
+            px[i + 3] = 255;
+        }
+    }
+    px
+}
+
 /// Encodes several sizes of the icon as a Windows `.ico` file (32-bit
 /// bitmaps with alpha, the format every Windows version understands).
 pub fn ico(sizes: &[u32]) -> Vec<u8> {
@@ -132,6 +168,16 @@ mod tests {
         assert_eq!(px[3], 0, "corners are transparent");
         let centre = ((16 * 32 + 16) * 4) as usize;
         assert_eq!(px[centre + 3], 255, "centre is opaque");
+    }
+
+    #[test]
+    fn draws_a_battery_gauge() {
+        let px = draw_with_battery(16, 60, false);
+        // Bottom row, middle: inside the bar, opaque.
+        let i = ((14 * 16 + 4) * 4) as usize;
+        assert_eq!(&px[i..i + 4], &[22, 163, 74, 255]);
+        let i = ((14 * 16 + 13) * 4) as usize;
+        assert_eq!(&px[i..i + 4], &[51, 65, 85, 255]);
     }
 
     #[test]

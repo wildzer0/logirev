@@ -30,6 +30,18 @@ check_updates = true
 # identity, firmware components, every feature and the live HID++ messages.
 developer = false
 
+# Show a short message on screen when a button changes the DPI, the
+# precision mode, the computer or the keyboard backlight.
+osd = true
+
+# Windows: show the lowest battery level on the tray icon.
+tray_battery = true
+
+# Windows, every mouse: wheel speed (1.0 = normal, 2.0 = twice as far per
+# notch, 0.5 = half; from 0.25 to 5) and smooth scrolling.
+scroll_speed = 1.0
+smooth_scrolling = false
+
 # -----------------------------------------------------------------------------
 #  Logging
 # -----------------------------------------------------------------------------

@@ -56,8 +56,8 @@ use crate::hidpp::transport::{self, Incoming, Transport, Waker};
 use crate::input::{self, Injector, Key};
 use crate::pcap::PcapWriter;
 use crate::status::{
-    ControlInfo, DeviceDetails, DeviceStatus, HostsStatus, LinkStatus, PairingStatus, Snapshot,
-    UiHooks, UiUpdate,
+    ControlInfo, DeviceDetails, DeviceStatus, HostsStatus, LinkStatus, PairingStatus, Preferences,
+    Snapshot, UiHooks, UiUpdate,
 };
 
 /// HID++ 1.0 notification sent by a receiver when a device (dis)connects.
@@ -190,6 +190,7 @@ pub fn run(
     };
     daemon.rescan();
     daemon.publish();
+    daemon.send_preferences();
     daemon.event_loop(&rx);
     daemon.shutdown();
     info!("stopped");
@@ -342,8 +343,10 @@ impl Daemon {
     /// Handles every queued frame and every due setup, on every link.
     fn pump(&mut self) {
         let mut ctx = ctx!(self);
+        let mut osd = None;
         for link in &mut self.links {
             link.pump(&mut ctx);
+            osd = link.osd.take().or(osd);
         }
         let mut i = 0;
         while i < self.links.len() {
@@ -354,6 +357,12 @@ impl Daemon {
                 self.dirty = true;
             } else {
                 i += 1;
+            }
+        }
+        if let (Some(event), Some(h)) = (osd, &self.hooks) {
+            if self.cfg.general.osd {
+                let italian = crate::locale::italian(&self.cfg.general.language);
+                (h.observer)(UiUpdate::Osd(event.text(italian)));
             }
         }
         let (notices, switch_all) = (ctx.notices, ctx.switch_all);
@@ -425,7 +434,15 @@ impl Daemon {
             link.apply_new_config(&mut ctx);
         }
         self.dirty = true;
+        self.send_preferences();
         info!("configuration reloaded; re-applying profiles (log file and capture settings need a restart)");
+    }
+
+    /// Tells the tray process about the settings it applies itself.
+    fn send_preferences(&self) {
+        if let Some(h) = &self.hooks {
+            (h.observer)(UiUpdate::Preferences(Preferences::from_config(&self.cfg)));
+        }
     }
 
     /// Sends a snapshot to the interface if anything changed.
@@ -618,6 +635,52 @@ struct Link {
     changed: bool,
     /// A pairing session in progress (or just finished).
     pairing: Option<Pairing>,
+    /// A change made by a button, to show on screen.
+    osd: Option<OsdEvent>,
+    /// Slots seen charging, to announce when they are full.
+    charging: BTreeSet<u8>,
+}
+
+/// A change made by a button, shown briefly on screen.
+#[derive(Debug, Clone, PartialEq)]
+enum OsdEvent {
+    /// Precision mode on (`Some(dpi)` when done with DPI) or off.
+    Precision(bool, Option<u16>),
+    /// New DPI.
+    Dpi(u16),
+    /// Device sent to computer N (1-based).
+    Host(String, u8),
+    /// Keyboard backlight: off, or on at `level` of `levels`.
+    Backlight(bool, u8, u8),
+}
+
+impl OsdEvent {
+    fn text(&self, italian: bool) -> String {
+        let tr = |en, it| crate::locale::pick(italian, en, it).to_owned();
+        match self {
+            OsdEvent::Precision(true, Some(dpi)) => {
+                format!(
+                    "{} · {dpi} DPI",
+                    tr("Precision mode on", "Modalità precisione attiva")
+                )
+            }
+            OsdEvent::Precision(true, None) => {
+                tr("Precision mode on", "Modalità precisione attiva")
+            }
+            OsdEvent::Precision(false, _) => {
+                tr("Precision mode off", "Modalità precisione disattivata")
+            }
+            OsdEvent::Dpi(dpi) => format!("{dpi} DPI"),
+            OsdEvent::Host(name, n) => format!("{name} → {} {n}", tr("computer", "computer")),
+            OsdEvent::Backlight(false, ..) => tr("Backlight off", "Retroilluminazione spenta"),
+            OsdEvent::Backlight(true, level, levels) => format!(
+                "{} {}/{}",
+                tr("Backlight", "Retroilluminazione"),
+                level + 1,
+                levels
+            ),
+        }
+    }
 }
 
 impl Link {
@@ -632,6 +695,8 @@ impl Link {
             lost: None,
             changed: true,
             pairing: None,
+            osd: None,
+            charging: BTreeSet::new(),
         }
     }
 
@@ -646,6 +711,7 @@ impl Link {
                 kind: s.kind.to_string(),
                 online: true,
                 battery: s.battery.map(|b| b.to_string()),
+                battery_level: s.battery.map(|b| (b.percent, b.charging)),
                 dpi: s.base_dpi,
                 profile: s
                     .profile
@@ -666,6 +732,7 @@ impl Link {
                     kind: p.kind.to_string(),
                     online: false,
                     battery: None,
+                    battery_level: None,
                     dpi: None,
                     remapped: 0,
                     hosts: None,
@@ -963,13 +1030,35 @@ impl Link {
         let Some(b) = s.battery else {
             return;
         };
+        let italian = crate::locale::italian(&ctx.cfg.general.language);
+        let tr = |en, it| crate::locale::pick(italian, en, it);
+        if b.charging && !b.full {
+            self.charging.insert(slot);
+        } else if b.full && self.charging.remove(&slot) {
+            info!("slot {slot}: \"{}\" fully charged", s.name);
+            ctx.notices.push((
+                tr("Fully charged", "Carica completa").into(),
+                format!(
+                    "{}: {}",
+                    s.name,
+                    tr("the battery is full.", "la batteria è carica.")
+                ),
+            ));
+        } else if !b.charging {
+            self.charging.remove(&slot);
+        }
         if level == 0 || b.charging || b.full || b.percent > level.saturating_add(5) {
             self.battery_warned.remove(&slot);
         } else if b.percent <= level && self.battery_warned.insert(slot) {
             warn!("slot {slot}: \"{}\" battery low ({}%)", s.name, b.percent);
             ctx.notices.push((
-                "Battery low".into(),
-                format!("{}: {}% left. Charge it soon.", s.name, b.percent),
+                tr("Battery low", "Batteria scarica").into(),
+                format!(
+                    "{}: {}% {}",
+                    s.name,
+                    b.percent,
+                    tr("left. Charge it soon.", "rimasto. Ricaricala presto.")
+                ),
             ));
         }
     }
@@ -1044,6 +1133,11 @@ impl Link {
             Ok(()) => {
                 s.slow = turning_on.then_some(slow);
                 info!("slot {slot}: slow mode {}", on_off(turning_on));
+                let dpi = match slow {
+                    SlowMode::Dpi(d) => Some(d),
+                    SlowMode::PointerSpeed(_) => None,
+                };
+                self.osd = Some(OsdEvent::Precision(turning_on, dpi));
             }
             Err(e) => warn!("slot {slot}: cannot switch slow mode: {e}"),
         }
@@ -1064,6 +1158,7 @@ impl Link {
                 s.slow = None;
                 self.changed = true;
                 info!("slot {slot}: DPI {next}");
+                self.osd = Some(OsdEvent::Dpi(next));
             }
             Err(e) => warn!("slot {slot}: cannot set DPI {next}: {e}"),
         }
@@ -1104,6 +1199,7 @@ impl Link {
             Ok(()) => {
                 info!("slot {slot}: backlight {state}");
                 s.backlight = Some((state, levels));
+                self.osd = Some(OsdEvent::Backlight(state.enabled, state.level, levels));
             }
             Err(e) => warn!("slot {slot}: cannot change the backlight: {e}"),
         }
@@ -1194,6 +1290,7 @@ impl Link {
                 return Ok(());
             }
             info!("slot {slot}: switching to computer {} of {count}", host + 1);
+            self.osd = Some(OsdEvent::Host(s.name.clone(), host + 1));
             dev.set_host(host)
         });
         if let Err(e) = result {

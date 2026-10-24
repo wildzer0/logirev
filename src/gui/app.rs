@@ -122,6 +122,8 @@ pub struct SettingsApp {
     traffic_only_device: bool,
     /// Developer mode: when the report was copied.
     report_copied: Option<Instant>,
+    /// Outcome of the last export / import.
+    backup_result: Option<Result<String, String>>,
     new_program: String,
     running_programs: Vec<String>,
     logo: Option<TextureHandle>,
@@ -176,6 +178,7 @@ impl SettingsApp {
             traffic_paused: None,
             traffic_only_device: true,
             report_copied: None,
+            backup_result: None,
             new_program: String::new(),
             running_programs: Vec::new(),
             logo: None,
@@ -2130,7 +2133,7 @@ impl SettingsApp {
             ui,
             pal.card,
             pal.border,
-            &format!("{}  {}", icon::BATTERY_LOW, t.battery),
+            &format!("{}  {}", icon::BATTERY_LOW, t.battery_and_messages),
             |ui| {
                 ui.horizontal(|ui| {
                     ui.label(t.battery_warning);
@@ -2148,7 +2151,42 @@ impl SettingsApp {
                     );
                     self.raw.general.battery_warning = v;
                 });
+                #[cfg(windows)]
+                ui.checkbox(&mut self.raw.general.tray_battery, t.tray_battery);
+                ui.checkbox(&mut self.raw.general.osd, t.osd_on);
+                ui.label(RichText::new(t.osd_hint).small().color(pal.muted));
             },
+        );
+
+        #[cfg(windows)]
+        section(
+            ui,
+            pal.card,
+            pal.border,
+            &format!("{}  {}", icon::MOUSE_SCROLL, t.wheel_all),
+            |ui| {
+                ui.label(RichText::new(t.wheel_all_hint).small().color(pal.muted));
+                ui.horizontal(|ui| {
+                    ui.label(t.scroll_speed);
+                    ui.add(
+                        egui::Slider::new(&mut self.raw.general.scroll_speed, 0.25..=3.0)
+                            .step_by(0.05)
+                            .custom_formatter(|v, _| format!("{:.0}%", v * 100.0)),
+                    );
+                    if self.raw.general.scroll_speed != 1.0 && ui.button(t.normal).clicked() {
+                        self.raw.general.scroll_speed = 1.0;
+                    }
+                });
+                ui.checkbox(&mut self.raw.general.smooth_scrolling, t.smooth_scrolling);
+            },
+        );
+
+        section(
+            ui,
+            pal.card,
+            pal.border,
+            &format!("{}  {}", icon::FLOPPY_DISK, t.backup),
+            |ui| self.backup_ui(ui),
         );
 
         #[cfg(windows)]
@@ -2278,17 +2316,77 @@ impl SettingsApp {
             },
         );
 
-        let g = &self.raw.general;
-        if g.language != before.language
-            || g.theme != before.theme
-            || g.battery_warning != before.battery_warning
-            || self.raw.logging.level != level_before
-        {
+        if self.raw.general != before || self.raw.logging.level != level_before {
             self.lang = Lang::from_setting(&self.raw.general.language);
             self.t = self.lang.texts();
             self.apply_theme(ui.ctx());
             self.changed();
         }
+    }
+
+    /// Export / import of the whole configuration.
+    fn backup_ui(&mut self, ui: &mut Ui) {
+        let t = self.t;
+        let pal = palette(ui.visuals().dark_mode);
+        ui.label(RichText::new(t.backup_hint).small().color(pal.muted));
+        #[cfg(windows)]
+        ui.horizontal(|ui| {
+            if ui
+                .button(format!("{} {}", icon::FLOPPY_DISK, t.export_settings))
+                .clicked()
+            {
+                if let Some(path) = rfd::FileDialog::new()
+                    .set_file_name("logirev-settings.toml")
+                    .add_filter("logirev", &["toml"])
+                    .save_file()
+                {
+                    self.backup_result = Some(match self.raw.save(&path) {
+                        Ok(()) => Ok(t.exported.to_owned()),
+                        Err(e) => Err(e),
+                    });
+                }
+            }
+            if ui
+                .button(format!("{} {}", icon::FOLDER_OPEN, t.import_settings))
+                .clicked()
+            {
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("logirev", &["toml"])
+                    .pick_file()
+                {
+                    self.backup_result = Some(self.import_settings(&path));
+                }
+            }
+        });
+        ui.label(
+            RichText::new(fill(
+                t.settings_file_is,
+                &[&self.config_path.display().to_string()],
+            ))
+            .small(),
+        );
+        match &self.backup_result {
+            Some(Ok(msg)) => {
+                ui.label(RichText::new(format!("{} {msg}", icon::CHECK)).color(GOOD));
+            }
+            Some(Err(e)) => {
+                ui.label(RichText::new(format!("{} {e}", icon::WARNING)).color(BAD));
+            }
+            None => {}
+        }
+    }
+
+    /// Replaces the settings with those of `path`, if they are valid.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    fn import_settings(&mut self, path: &Path) -> Result<String, String> {
+        let raw = RawConfig::load(path)?;
+        let base = path.parent().unwrap_or(Path::new("."));
+        crate::config::Config::from_raw(raw.clone(), base)?;
+        self.raw = raw;
+        self.lang = Lang::from_setting(&self.raw.general.language);
+        self.t = self.lang.texts();
+        self.changed();
+        Ok(self.t.imported.to_owned())
     }
 
     fn about_page(&mut self, ui: &mut Ui) {
@@ -2716,6 +2814,8 @@ fn demo_snapshot() -> Snapshot {
         kind: kind.into(),
         online,
         battery: battery.map(Into::into),
+        battery_level: battery
+            .and_then(|b| b.trim_end_matches('%').parse().ok().map(|p| (p, false))),
         dpi: online.then_some(750),
         profile: Some("MX Ergo".into()),
         remapped: if online { 5 } else { 0 },

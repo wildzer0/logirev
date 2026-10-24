@@ -174,6 +174,18 @@ latest published release (e.g. set `version = "0.9.0"` locally).
 | O5 | Untick developer mode | The tab disappears; the service stops recording messages (no extra CPU). |
 | O6 | `logirevctl scan --hidden` | Identity and firmware components per device, then "hidden features (unlocked for a moment, then locked again)" with the list, or "none beyond the list above". The device keeps working normally afterwards. |
 
+## P. On-screen messages, tray battery, scrolling, backup
+
+| # | Do | Expect |
+|---|---|---|
+| P1 | Press the precision-mode button | A dark box at the bottom of the screen: "Modalità precisione attiva · 400 DPI" for about a second; again → "...disattivata". It never steals the focus or blocks clicks. |
+| P2 | *Settings → Battery and messages* → untick *Show changes on screen* | No box any more. |
+| P3 | Tray icon | A small bar at the bottom of the icon: green above 50 %, amber above 20 %, red below; cyan while charging. Untick *Show the battery level...* → plain icon. |
+| P4 | Charge the device until full | Notification "Carica completa / Fully charged". |
+| P5 | *Settings → Scrolling* → speed 200 % | One wheel notch scrolls twice as far, in every program and with every mouse; *Normal* resets it. |
+| P6 | Tick *Smooth scrolling* | Scrolling glides instead of jumping (best seen in a browser or Notepad). Untick both → the wheel is untouched (the hook is removed: log "wheel: back to normal"). |
+| P7 | *Backup → Export settings...*, change something, *Import settings...* the exported file | "Settings imported and applied"; the change is undone. Importing a broken file shows the error and changes nothing. |
+
 ## J. Command-line tools
 
 | # | Do | Expect |

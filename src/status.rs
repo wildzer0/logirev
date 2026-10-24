@@ -62,6 +62,9 @@ pub struct DeviceStatus {
     pub online: bool,
     /// Battery level, e.g. "80% (charging)".
     pub battery: Option<String>,
+    /// Battery level in percent, and whether it is charging.
+    #[serde(default)]
+    pub battery_level: Option<(u8, bool)>,
     /// Current DPI, if adjustable.
     pub dpi: Option<u16>,
     /// Name of the profile applied, if any.
@@ -183,6 +186,32 @@ pub enum UiUpdate {
     },
     /// The service stopped; `Some` carries the error that stopped it.
     Stopped(Option<String>),
+    /// A short message to show on screen for a moment (e.g. "800 DPI").
+    Osd(String),
+    /// Settings the tray process applies itself (at start and on reload).
+    Preferences(Preferences),
+}
+
+/// Settings applied by the tray process rather than by the service.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Preferences {
+    /// Show the lowest battery level on the tray icon.
+    pub tray_battery: bool,
+    /// Wheel speed in percent (100 = unchanged).
+    pub scroll_percent: u16,
+    /// Smooth scrolling.
+    pub smooth_scrolling: bool,
+}
+
+impl Preferences {
+    /// From the configuration.
+    pub fn from_config(cfg: &crate::config::Config) -> Self {
+        Self {
+            tray_battery: cfg.general.tray_battery,
+            scroll_percent: (cfg.general.scroll_speed * 100.0).round() as u16,
+            smooth_scrolling: cfg.general.smooth_scrolling,
+        }
+    }
 }
 
 /// Callback receiving updates; called on the daemon thread.
@@ -208,6 +237,7 @@ mod tests {
             kind: "mouse".into(),
             online,
             battery: battery.map(Into::into),
+            battery_level: None,
             dpi: None,
             profile: None,
             remapped: 0,
