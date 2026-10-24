@@ -1,0 +1,103 @@
+# Release: pushing a tag such as "v0.2.0" builds logirev for Windows and
+# Linux and publishes the archives on the repository's Releases page.
+#
+#   git tag v0.2.0 && git push origin v0.2.0
+#
+# The tag must match the version in Cargo.toml (checked below).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            exe: .exe
+          - name: linux-x64
+            os: ubuntu-latest
+            # musl: a fully static binary that runs on any Linux distribution.
+            target: x86_64-unknown-linux-musl
+            exe: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check that the tag matches Cargo.toml
+        shell: bash
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | cut -d '"' -f2)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml version $version"
+            exit 1
+          fi
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Test
+        if: matrix.os == 'windows-latest'
+        run: cargo test --locked
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package
+        shell: bash
+        run: |
+          dir="logirev-${GITHUB_REF_NAME}-${{ matrix.name }}"
+          mkdir -p "$dir/docs" "$dir/tools"
+          cp "target/${{ matrix.target }}/release/logirev${{ matrix.exe }}" "$dir/"
+          cp "target/${{ matrix.target }}/release/logirevctl${{ matrix.exe }}" "$dir/"
+          cp README.md CHANGELOG.md LICENSE.md "$dir/"
+          cp docs/*.md "$dir/docs/"
+          cp config/logirev.toml "$dir/logirev.example.toml"
+          cp tools/hidpp.lua "$dir/tools/"
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            7z a "$dir.zip" "$dir" > /dev/null
+            echo "ASSET=$dir.zip" >> "$GITHUB_ENV"
+          else
+            cp tools/42-logirev.rules "$dir/tools/"
+            tar czf "$dir.tar.gz" "$dir"
+            echo "ASSET=$dir.tar.gz" >> "$GITHUB_ENV"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ env.ASSET }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: cd dist && sha256sum * > SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          # Versions like v0.3.0-beta.1 are marked as pre-releases.
+          prerelease: ${{ contains(github.ref_name, '-') }}

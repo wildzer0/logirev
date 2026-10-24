@@ -1,0 +1,11 @@
+# udev rules for logirev (Linux only).
+#
+# Install:  sudo cp 42-logirev.rules /etc/udev/rules.d/
+#           sudo udevadm control --reload && sudo udevadm trigger
+# Then unplug and re-plug the receiver, and log out / in once.
+
+# Let the logged-in user talk HID++ to Logitech receivers and devices.
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="046d", TAG+="uaccess"
+
+# Let the logged-in user create the virtual keyboard used for remapped buttons.
+KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"

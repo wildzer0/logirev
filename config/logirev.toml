@@ -1,0 +1,104 @@
+# =============================================================================
+#  logirev configuration
+# =============================================================================
+#
+#  Lines starting with "#" are comments and are ignored.
+#  Changes are applied automatically a couple of seconds after you save the
+#  file (except the log file and capture settings, which need a restart).
+#  If the file contains a mistake, the previous settings stay active and the
+#  error is written to the log.
+#
+#  Tip: run "logirevctl scan" to see the exact name of your device and the list
+#  of buttons that can be remapped on it.
+
+# -----------------------------------------------------------------------------
+#  General
+# -----------------------------------------------------------------------------
+[general]
+# Which receivers / devices to use. "auto" uses all of them (several receivers
+# can be plugged in at the same time). To use only one kind, write its USB
+# product id, e.g. "c548" for Bolt or "c52b" for Unifying.
+product_id = "auto"
+
+# -----------------------------------------------------------------------------
+#  Logging
+# -----------------------------------------------------------------------------
+[logging]
+# How much detail to write: "error", "warn", "info", "debug" or "trace".
+# "trace" also writes every single HID++ packet (useful for bug reports).
+level = "info"
+
+# Log file, next to this configuration file. It never grows beyond max_size:
+# when full it is renamed to "logirev.1.log" and a new one is started.
+file = "logirev.log"
+max_size = 1048576            # 1 MiB
+
+# Optional capture of all HID++ traffic, readable with Wireshark.
+# Remove the "#" in front of the next line to enable it.
+# pcap = "logirev.pcap"
+pcap_max_size = 10485760      # 10 MiB
+
+# -----------------------------------------------------------------------------
+#  Device profiles
+# -----------------------------------------------------------------------------
+#
+#  Each [[profile]] block describes how to configure one kind of device.
+#  When a device connects, the FIRST profile whose "match" fits is used.
+#
+#  match = { name = "...", kind = "..." }
+#      name : text contained in the device name (upper/lower case ignored)
+#      kind : mouse, trackball, keyboard, trackpad, presenter, ...
+#      Leave out "match" to make a profile that fits every device.
+#
+#  Settings (all optional; leave one out to keep the device's own value):
+#      dpi           = 1600    # sensor resolution ("logirevctl scan" shows the valid values)
+#      pointer_speed = 1.0     # 0.18 .. 2.00, 1.0 = normal (only some devices)
+#      hires_wheel   = false   # high-resolution scrolling (see README first!)
+#      invert_wheel  = false   # reverse the scroll direction
+#
+#  Buttons: one line per button you want to change, in the [profile.buttons]
+#  part. Button names: left, right, middle, back, forward, tilt_left,
+#  tilt_right, precision (= dpi_switch), gesture, smartshift -- or the numeric id
+#  shown by "logirevctl scan", written in quotes: "0x53" = { ... }
+#
+#      { action = "keys", keys = "Ctrl+C" }          press a shortcut
+#      { action = "click", button = "middle" }       left/right/middle/back/forward
+#      { action = "command", command = "calc.exe" }  start a program
+#      { action = "command", command = "notepad.exe", args = ["C:\\notes.txt"] }
+#      { action = "toggle-dpi", dpi = 400 }          slow mode on/off (DPI)
+#      { action = "toggle-pointer-speed", speed = 0.4 }  slow mode (pointer speed)
+#      { action = "disable" }                        the button does nothing
+#      { action = "default" }                        normal behaviour
+#
+#  Key names: Ctrl, Shift, Alt, Super (= Windows key), A..Z, 0..9, F1..F24,
+#  Enter, Escape, Tab, Space, Backspace, Delete, Insert, Home, End, PageUp,
+#  PageDown, Left, Right, Up, Down, PrintScreen, VolumeUp, VolumeDown,
+#  VolumeMute, MediaPlayPause, MediaNext, MediaPrevious, BrowserBack,
+#  BrowserForward, Calculator, ... (full list in the README).
+
+# --- Logitech MX Ergo S (and MX Ergo) trackball ------------------------------
+# The MX Ergo S changes speed through its DPI (sensor resolution). Remove the
+# "#" below to force a resolution; otherwise the device keeps its own.
+[[profile]]
+name = "MX Ergo"
+match = { name = "MX Ergo", kind = "trackball" }
+# dpi = 750
+
+[profile.buttons]
+back       = { action = "keys", keys = "Alt+Left" }      # browser back
+forward    = { action = "keys", keys = "Alt+Right" }     # browser forward
+tilt_left  = { action = "keys", keys = "Ctrl+Shift+Tab" } # previous tab
+tilt_right = { action = "keys", keys = "Ctrl+Tab" }       # next tab
+# The button below the wheel: slow mode for precise work. Use
+# { action = "default" } instead to keep the device's built-in behaviour.
+precision  = { action = "toggle-dpi", dpi = 400 }
+middle     = { action = "default" }
+
+# --- Any other mouse or trackball -------------------------------------------
+[[profile]]
+name = "Generic pointing device"
+match = { kind = "mouse" }
+
+[profile.buttons]
+back    = { action = "default" }
+forward = { action = "default" }

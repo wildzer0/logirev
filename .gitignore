@@ -1,0 +1,20 @@
+# Build output
+/target/
+/dist/
+
+# Files logirev creates while running from the source tree
+*.log
+*.pcap
+/logirev.toml
+
+# Private development notes (not part of the project)
+PROGRESS.md
+
+# Editors and operating systems
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
