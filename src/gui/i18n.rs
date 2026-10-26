@@ -208,6 +208,7 @@ texts! {
     act_host => "Switch computer", "Cambia computer";
     act_brightness => "Screen brightness", "Luminosità dello schermo";
     act_backlight => "Keyboard backlight", "Retroilluminazione tastiera";
+    act_lock => "Lock the PC", "Blocca il PC";
     act_macro => "Macro", "Macro";
     act_radial => "Radial menu", "Menù radiale";
     act_desktop => "Switch desktop", "Cambia desktop";

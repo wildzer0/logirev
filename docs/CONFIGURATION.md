@@ -162,6 +162,7 @@ rejected with an error naming both.
 | `brightness` | screen brightness: `change` by a percentage, or `set` a percentage | `{ action = "brightness", change = -10 }` |
 | `backlight` | keyboard backlight: `up`, `down` or `toggle` | `{ action = "backlight", change = "up" }` |
 | `desktop` | changes virtual desktop: `direction = "next"` or `"prev"` (Windows: Win+Ctrl+←/→; Linux: Ctrl+Alt+←/→) | `{ action = "desktop", direction = "next" }` |
+| `lock` | locks the screen (Windows `LockWorkStation`; on Linux the session manager or screen locker) | `{ action = "lock" }` |
 | `macro` | runs a macro defined in `[macros]` (see below); `repeat = 100` repeats it every 100 ms while held | `{ action = "macro", name = "signature" }` |
 | `sequence` | several steps in a row (a simple macro, see below) | `{ action = "sequence", steps = [ { keys = "Ctrl+C" } ] }` |
 | `gesture` | hold the button and move the pointer (see below) | `{ action = "gesture", up = { ... } }` |

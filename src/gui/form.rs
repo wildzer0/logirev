@@ -26,6 +26,7 @@ pub enum Kind {
     ChangeHost,
     Brightness,
     Backlight,
+    Lock,
     Macro,
     /// Open a radial menu (pointing devices only).
     Radial,
@@ -50,6 +51,7 @@ impl Kind {
             Kind::ChangeHost => icon::DESKTOP,
             Kind::Brightness => icon::SUN,
             Kind::Backlight => icon::LIGHTBULB,
+            Kind::Lock => icon::LOCK,
             Kind::Macro => icon::STACK,
             Kind::Radial => icon::HAND_POINTING,
             Kind::Desktop => icon::DESKTOP,
@@ -71,6 +73,7 @@ impl Kind {
             Kind::ChangeHost => t.act_host,
             Kind::Brightness => t.act_brightness,
             Kind::Backlight => t.act_backlight,
+            Kind::Lock => t.act_lock,
             Kind::Macro => t.act_macro,
             Kind::Radial => t.act_radial,
             Kind::Desktop => t.act_desktop,
@@ -223,6 +226,7 @@ impl ActionForm {
                 f.kind = Kind::Backlight;
                 f.backlight = *change;
             }
+            RawAction::Lock => f.kind = Kind::Lock,
             RawAction::Macro { name, repeat } => {
                 f.kind = Kind::Macro;
                 f.macro_name = name.clone();
@@ -311,6 +315,7 @@ impl ActionForm {
             Kind::Backlight => RawAction::Backlight {
                 change: self.backlight,
             },
+            Kind::Lock => RawAction::Lock,
             Kind::Macro if self.macro_name.is_empty() => return None,
             Kind::Macro => RawAction::Macro {
                 name: self.macro_name.clone(),
@@ -413,7 +418,7 @@ impl ActionForm {
         if !nested {
             kinds.push(Kind::Backlight);
         }
-        kinds.push(Kind::Macro);
+        kinds.extend([Kind::Lock, Kind::Macro]);
         if fc.pointing && !fc.menus.is_empty() && !fc.menu_item {
             kinds.push(Kind::Radial);
         }
@@ -507,7 +512,7 @@ impl ActionForm {
         }
 
         let matched_now = picked || (matched.is_some() && chosen_kind.is_none());
-        if matched_now || matches!(self.kind, Kind::Default | Kind::Disable) {
+        if matched_now || matches!(self.kind, Kind::Default | Kind::Disable | Kind::Lock) {
             return;
         }
         ui.add_space(8.0);
@@ -687,6 +692,7 @@ impl ActionForm {
                 }
             }
             Kind::Gesture => self.gesture_ui(ui, fc, id),
+            Kind::Lock => {}
             Kind::Radial => {
                 if !fc.pointing {
                     ui.colored_label(
@@ -931,7 +937,7 @@ fn presets(fc: &FormContext, nested: bool) -> Vec<(&'static str, Vec<Preset>)> {
                     }),
                 ),
                 p(icon::APP_WINDOW, t.p_switch_app, keys("Alt+Tab")),
-                p(icon::LOCK, t.p_lock, keys("Super+L")),
+                p(icon::LOCK, t.p_lock, Some(RawAction::Lock)),
                 p(icon::CAMERA, t.p_screenshot, keys("Super+Shift+S")),
                 p(icon::ZOOM_IN, t.p_zoom_in, keys("Ctrl+Equal")),
                 p(icon::ZOOM_OUT, t.p_zoom_out, keys("Ctrl+Minus")),
@@ -1203,6 +1209,7 @@ mod tests {
         round_trip(r#"{ action = "brightness", change = -10 }"#);
         round_trip(r#"{ action = "brightness", set = 70 }"#);
         round_trip(r#"{ action = "backlight", change = "up" }"#);
+        round_trip(r#"{ action = "lock" }"#);
         round_trip(r#"{ action = "macro", name = "m", repeat = 200 }"#);
         round_trip(r#"{ action = "desktop", direction = "next" }"#);
         round_trip(r#"{ action = "desktop", direction = "prev" }"#);

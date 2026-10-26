@@ -79,6 +79,7 @@ pub mod logging;
 pub mod pcap;
 pub(crate) mod radial;
 pub mod service;
+pub mod session;
 pub mod sha256;
 pub mod status;
 pub mod ui;

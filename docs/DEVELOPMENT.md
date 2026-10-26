@@ -86,6 +86,7 @@ Both are thin wrappers around the library in `src/lib.rs`.
 | `src/http.rs` | minimal HTTPS downloads (WinHTTP / curl), 64 MiB cap |
 | `src/sha256.rs` | SHA-256 of downloaded updates |
 | `src/locale.rs` | English / Italian choice for the service messages |
+| `src/session.rs` | session actions: lock the screen (Win32 / Linux screen lockers) |
 | `src/autostart.rs` | "Start with Windows" registry entry |
 | `tools/hidpp.lua` | Wireshark dissector |
 | `config/logirev.toml` | commented default configuration (embedded in the binary) |

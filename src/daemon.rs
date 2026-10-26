@@ -1339,6 +1339,12 @@ impl Link {
                 self.change_backlight(slot, *change);
                 Ok(())
             }
+            Action::Lock if down => {
+                if let Err(e) = crate::session::lock_screen() {
+                    warn!("cannot lock the screen: {e}");
+                }
+                Ok(())
+            }
             Action::Command { program, args } if down => spawn(program, args),
             Action::Toggle(slow) if down => {
                 self.toggle_slow_mode(slot, *slow);
@@ -2290,6 +2296,7 @@ fn summarize(action: &Action) -> String {
         Action::Gesture(_) => "gesture".into(),
         Action::Radial { menu } => format!("radial menu \"{menu}\""),
         Action::Desktop(direction) => format!("desktop {direction:?}").to_lowercase(),
+        Action::Lock => "lock the screen".into(),
         Action::Disable => "nothing".into(),
     }
 }

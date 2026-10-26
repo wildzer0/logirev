@@ -3,6 +3,14 @@
 All notable changes are listed here. Versions follow
 [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Added
+- New `lock` action (and the *Lock the PC* preset) that locks the screen
+  through the system (`LockWorkStation` on Windows, the session manager or
+  the usual screen lockers on Linux) instead of simulating `Win+L`, which
+  Windows ignores when it comes from `SendInput`.
+
 ## [1.4.1] — 2026-10-26
 
 ### Added

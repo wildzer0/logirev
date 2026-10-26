@@ -106,6 +106,7 @@ pcap_max_size = 10485760      # 10 MiB
 #      { action = "brightness", set = 50 }             screen at 50 %
 #      { action = "backlight", change = "up" }         keyboard light: up/down/toggle
 #      { action = "desktop", direction = "next" }      next/previous virtual desktop
+#      { action = "lock" }                             lock the screen
 #      { action = "radial", menu = "work" }            a radial menu (see below)
 #      { action = "macro", name = "signature" }        a macro from [macros] below
 #      { action = "macro", name = "spam", repeat = 100 }  ...repeated while held

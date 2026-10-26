@@ -401,6 +401,8 @@ pub enum RawAction {
         /// Up, down or toggle.
         change: BacklightChange,
     },
+    /// Lock the screen.
+    Lock,
     /// Hold the button and move.
     Gesture {
         /// Action for an upward movement.
@@ -627,6 +629,8 @@ pub enum Action {
     Brightness(BrightnessChange),
     /// Change the keyboard backlight.
     Backlight(BacklightChange),
+    /// Lock the screen.
+    Lock,
     /// Hold the button and move the pointer: one action per direction.
     Gesture(Box<Gesture>),
     /// Open a radial menu at the pointer (any button of a pointing device).
@@ -1181,6 +1185,7 @@ fn validate_action(
             }
         }),
         RawAction::Backlight { change } => Action::Backlight(change),
+        RawAction::Lock => Action::Lock,
         RawAction::Gesture {
             up,
             down,
@@ -1609,6 +1614,7 @@ mod tests {
             tilt_right = { action = "brightness", set = 80 }
             middle = { action = "backlight", change = "toggle" }
             precision = { action = "change-host", host = 2, all = true }
+            "0x00C4" = { action = "lock" }
             "#,
         )
         .unwrap();
@@ -1635,6 +1641,7 @@ mod tests {
             Action::Brightness(BrightnessChange::To(80))
         );
         assert_eq!(p.buttons[&0x52], Action::Backlight(BacklightChange::Toggle));
+        assert_eq!(p.buttons[&0xC4], Action::Lock);
         assert_eq!(
             p.buttons[&0xFD],
             Action::ChangeHost {
