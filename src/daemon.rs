@@ -335,10 +335,27 @@ impl Daemon {
                     Event::Reload => self.reload_config(),
                     Event::Foreground(program) => self.set_foreground(&program),
                     Event::UpdateAvailable(version) => {
+                        if !self.cfg.general.check_updates {
+                            debug!("ignoring the update notice: checks are off");
+                            continue;
+                        }
                         info!("logirev {version} is available");
+                        let italian = crate::locale::italian(&self.cfg.general.language);
                         self.notify(
-                            "Update available",
-                            &format!("logirev {version} is available. Open logirev to install it."),
+                            crate::locale::pick(
+                                italian,
+                                "Update available",
+                                "Aggiornamento disponibile",
+                            ),
+                            &format!(
+                                "{} {version}{}",
+                                crate::locale::pick(italian, "logirev", "logirev",),
+                                crate::locale::pick(
+                                    italian,
+                                    " is available. Open logirev to install it.",
+                                    " è disponibile. Apri logirev per installarlo.",
+                                )
+                            ),
                         );
                     }
                     Event::ChangeHost { link, slot, host } => {
@@ -628,6 +645,7 @@ impl Daemon {
             log::set_max_level(level);
         }
         self.cfg = new;
+        crate::update::set_enabled(self.cfg.general.check_updates);
         let mut ctx = ctx!(self);
         for link in &mut self.links {
             link.t.traffic().set_enabled(ctx.cfg.general.developer);

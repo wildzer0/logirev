@@ -266,14 +266,16 @@ impl Transport {
                 routes.entry(*id).or_insert(writers.len() - 1);
             }
             let reader = open("for reading")?;
-            readers.push(spawn_reader(
+            let reader = spawn_reader(
                 reader,
                 tx.clone(),
                 Arc::clone(&stop),
                 pcap.clone(),
                 Arc::clone(&traffic),
                 waker.clone(),
-            ));
+            )
+            .map_err(|e| HidppError::Io(format!("cannot start the HID reader: {e}")))?;
+            readers.push(reader);
             debug!("opened {path:?} for report ids {ids:02X?}");
         }
 
@@ -504,7 +506,7 @@ fn spawn_reader(
     pcap: Option<Arc<Mutex<PcapWriter>>>,
     traffic: Arc<TrafficLog>,
     waker: Option<Waker>,
-) -> JoinHandle<()> {
+) -> std::io::Result<JoinHandle<()>> {
     let wake = move || {
         if let Some(w) = &waker {
             w();
@@ -545,7 +547,6 @@ fn spawn_reader(
                 }
             }
         })
-        .expect("failed to spawn HID reader thread")
 }
 
 #[cfg(test)]

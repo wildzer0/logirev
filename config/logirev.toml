@@ -75,7 +75,7 @@ pcap_max_size = 10485760      # 10 MiB
 #  Settings (all optional; leave one out to keep the device's own value).
 #  "logirevctl scan" shows which ones your device has and their values.
 #      dpi           = 1600    # sensor resolution / speed
-#      pointer_speed = 1.0     # 0.18 .. 2.00, 1.0 = normal (only some devices)
+#      pointer_speed = 1.0     # 0.18 .. 1.99, 1.0 = normal (only some devices)
 #      hires_wheel   = false   # high-resolution scrolling (see the docs first!)
 #      invert_wheel  = false   # reverse the scroll direction
 #      smartshift    = { mode = "smart", threshold = 10 }  # or "ratchet", "free" (MX Master)

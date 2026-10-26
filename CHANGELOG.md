@@ -3,6 +3,23 @@
 All notable changes are listed here. Versions follow
 [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Fixed
+- Pointer speed: 2.0× was offered by the window but rejected by the firmware;
+  the accepted range is now 0.18–1.99 everywhere.
+- The configuration is rejected with a clear message for an invalid
+  `product_id`, `language` or `theme`, and when the same button is written
+  twice (for example `back` and `"0x53"`).
+- The button editor finds actions written with a numeric control id
+  (`"0x00C3"`) instead of showing them as "default".
+- Turning *Check for updates* off or on works without restarting the
+  service, and the update message follows the interface language.
+- *Restart service* no longer freezes the window for 1.5 seconds.
+- A HID reader that cannot start is reported instead of panicking; an
+  unreadable backlight no longer stops the others; `logirevctl scan` reports
+  a configuration file that does not load.
+
 ## [1.4.0-rc.1] — 2026-10-26
 
 Release candidate for testing the radial menu (the Windows look and the

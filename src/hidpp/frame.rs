@@ -61,6 +61,11 @@ impl Frame {
     /// `payload` starts at byte 2 (sub-id / feature index).
     pub fn new(report_id: u8, device_index: u8, payload: &[u8]) -> Self {
         let len = report_len(report_id).expect("unsupported HID++ report id");
+        debug_assert!(
+            payload.len() <= len - 2,
+            "HID++ payload of {} bytes does not fit report {report_id:#04x}",
+            payload.len()
+        );
         let mut bytes = Vec::with_capacity(len);
         bytes.push(report_id);
         bytes.push(device_index);

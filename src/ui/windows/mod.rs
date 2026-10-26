@@ -242,9 +242,8 @@ fn start(p: Prepared, opts: &ServiceOptions) -> Result<(), String> {
         }
     };
     crate::foreground::watch(tx.clone());
-    if p.cfg.general.check_updates {
-        crate::update::spawn_checker(tx.clone());
-    }
+    crate::update::set_enabled(p.cfg.general.check_updates);
+    crate::update::spawn_checker(tx.clone());
     let ipc_for_daemon = app::start_ipc(&tx);
     let (cfg, config_path, pcap) = (p.cfg, p.config_path.clone(), p.pcap);
     let daemon_tx = tx.clone();

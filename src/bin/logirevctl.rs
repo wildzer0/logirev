@@ -17,7 +17,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use hidapi::HidApi;
-use log::{error, LevelFilter};
+use log::{error, warn, LevelFilter};
 use logirev::hidpp::diagnostics;
 
 use logirev::app::{self, ServiceOptions};
@@ -311,7 +311,13 @@ fn cmd_list() -> Result<(), String> {
 fn cmd_scan(cli: &Cli, config_path: &Path, hidden: bool) -> Result<(), String> {
     // The configuration is optional here: it is only used to show which
     // profile each device would get.
-    let cfg = Config::load(config_path).ok();
+    let cfg = match Config::load(config_path) {
+        Ok(cfg) => Some(cfg),
+        Err(e) => {
+            warn!("configuration not used: {e}");
+            None
+        }
+    };
     let api = HidApi::new().map_err(|e| e.to_string())?;
     let groups = transport::group_devices(&transport::enumerate(&api));
     if groups.is_empty() {

@@ -107,7 +107,7 @@ All optional: leave one out and the device keeps its own value.
 | Setting | Values | Notes |
 |---|---|---|
 | `dpi` | e.g. `750`, `1600` | sensor resolution. `logirevctl scan` lists the accepted values (*dpi choices*). The MX Ergo S changes speed this way. |
-| `pointer_speed` | `0.18` … `2.0` (1.0 = normal) | only devices that have the *PointerSpeed* feature (the MX Ergo S does not). |
+| `pointer_speed` | `0.18` … `1.99` (1.0 = normal) | only devices that have the *PointerSpeed* feature (the MX Ergo S does not). |
 | `hires_wheel` | `true` / `false` | high-resolution scrolling. Without Options+, Windows may scroll **very fast**: try it first. |
 | `invert_wheel` | `true` / `false` | reverses the scroll direction. |
 | `smartshift` | `{ mode = "smart", threshold = 10 }`, `{ mode = "ratchet" }`, `{ mode = "free" }` | wheels with SmartShift (MX Master): *smart* clicks, but spins freely when you scroll fast (lower threshold = frees sooner); *ratchet* always clicks; *free* always spins. |
@@ -142,6 +142,10 @@ back = { action = "keys", keys = "Alt+Left" }
 Any other button can be written with the id shown by `logirevctl scan`, in
 quotes: `"0x00C3" = { ... }`. Only buttons marked **remappable: yes** in the
 scan can be changed (left and right click never are).
+
+Write each button **once**: an alias and its number are the same control, so
+`back` together with `"0x53"` (or `precision` together with `dpi_switch`) is
+rejected with an error naming both.
 
 ### Actions
 

@@ -16,8 +16,9 @@
 
 use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::sync::mpsc::Sender;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use log::{debug, info, warn};
 use serde::Deserialize;
@@ -31,6 +32,23 @@ const PROGRAMS: [&str; 2] = ["logirev", "logirevctl"];
 /// First check after start, then once a day.
 const FIRST_CHECK: Duration = Duration::from_secs(60);
 const CHECK_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
+/// How often the checker looks at the setting while waiting (it does not go
+/// online unless [`enabled`] is true).
+const POLL: Duration = Duration::from_secs(60);
+
+/// Whether `[general] check_updates` is on. The daemon updates it when the
+/// settings are reloaded, so turning the check off works without a restart.
+static ENABLED: AtomicBool = AtomicBool::new(true);
+
+/// Turns the daily check on or off.
+pub fn set_enabled(on: bool) {
+    ENABLED.store(on, AtomicOrdering::Relaxed);
+}
+
+/// Whether the daily check is on.
+pub fn enabled() -> bool {
+    ENABLED.load(AtomicOrdering::Relaxed)
+}
 
 /// A published release, as returned by the GitHub API.
 #[derive(Debug, Clone, Deserialize)]
@@ -242,8 +260,17 @@ pub fn spawn_checker(tx: Sender<Event>) {
     let spawned = std::thread::Builder::new()
         .name("update-check".into())
         .spawn(move || {
-            std::thread::sleep(FIRST_CHECK);
+            let mut due = Instant::now() + FIRST_CHECK;
             loop {
+                std::thread::sleep(POLL);
+                if !enabled() {
+                    // Check soon after the user turns it back on.
+                    due = Instant::now() + FIRST_CHECK;
+                    continue;
+                }
+                if Instant::now() < due {
+                    continue;
+                }
                 match check() {
                     Ok(Some(release)) => {
                         if tx
@@ -256,7 +283,7 @@ pub fn spawn_checker(tx: Sender<Event>) {
                     Ok(None) => debug!("logirev is up to date"),
                     Err(e) => debug!("update check failed: {e}"),
                 }
-                std::thread::sleep(CHECK_EVERY);
+                due = Instant::now() + CHECK_EVERY;
             }
         });
     if let Err(e) = spawned {

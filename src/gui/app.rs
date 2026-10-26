@@ -9,6 +9,7 @@
 //! created on the first change (a copy of whatever profile applied before),
 //! so customising one device never changes another.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -25,7 +26,7 @@ use crate::config::{
     BacklightMode, Match, RawAction, RawApp, RawBacklight, RawConfig, RawMacro, RawMenu,
     RawMenuItem, RawProfile, RawSmartShift, RawStep, SmartShiftMode,
 };
-use crate::hidpp::features::{feature_name, DeviceKind, DISABLE_KEY_NAMES};
+use crate::hidpp::features::{feature_name, parse_control, DeviceKind, DISABLE_KEY_NAMES};
 use crate::hidpp::frame::RECEIVER_INDEX;
 use crate::hidpp::traffic::TrafficEntry;
 use crate::input::keys::MouseButton;
@@ -597,6 +598,7 @@ impl SettingsApp {
                     start_service(
                         &self.exe,
                         self.custom_config.then_some(self.config_path.as_path()),
+                        false,
                     );
                     self.last_attempt = None;
                 }
@@ -733,6 +735,7 @@ impl SettingsApp {
                     start_service(
                         &self.exe,
                         self.custom_config.then_some(self.config_path.as_path()),
+                        false,
                     );
                     self.last_attempt = None;
                 }
@@ -1041,13 +1044,18 @@ impl SettingsApp {
         }
         let mut hovered = None;
         for c in &details.controls {
-            let current = match app {
-                None => profile.buttons.get(&c.key).cloned(),
+            // Find the action by control id, not by the key as written: a
+            // hand-written file may use "0x00C3" where the window shows
+            // "gesture".
+            let found = match app {
+                None => action_for_control(&profile.buttons, c.cid),
                 Some(i) => profile
                     .apps
                     .get(i)
-                    .and_then(|a| a.buttons.get(&c.key).cloned()),
+                    .and_then(|a| action_for_control(&a.buttons, c.cid)),
             };
+            let current = found.as_ref().map(|(_, action)| action.clone());
+            let button_key = found.map(|(key, _)| key).unwrap_or_else(|| c.key.clone());
             let fill_color = if self.hovered_row == Some(c.cid) && c.remappable {
                 pal.card_hover
             } else {
@@ -1101,7 +1109,7 @@ impl SettingsApp {
                     device: d.name.clone(),
                     kind,
                     app,
-                    button_key: c.key.clone(),
+                    button_key: button_key.clone(),
                     button_label: control_label(t, c.cid),
                     gestures: c.gestures,
                     dpi_values: details.dpi_values.clone(),
@@ -1394,9 +1402,12 @@ impl SettingsApp {
                 }
                 if let Some(speed) = p.pointer_speed.as_mut() {
                     ui.add(
-                        egui::Slider::new(speed, 0.2..=2.0)
-                            .step_by(0.05)
-                            .suffix("×"),
+                        egui::Slider::new(
+                            speed,
+                            crate::config::POINTER_SPEED_MIN..=crate::config::POINTER_SPEED_MAX,
+                        )
+                        .step_by(0.05)
+                        .suffix("×"),
                     );
                 }
                 ui.add_space(6.0);
@@ -2511,7 +2522,7 @@ impl SettingsApp {
                 ui.horizontal(|ui| {
                     ui.label(t.scroll_speed);
                     ui.add(
-                        egui::Slider::new(&mut self.raw.general.scroll_speed, 0.25..=3.0)
+                        egui::Slider::new(&mut self.raw.general.scroll_speed, 0.25..=5.0)
                             .step_by(0.05)
                             .custom_formatter(|v, _| format!("{:.0}%", v * 100.0)),
                     );
@@ -2631,10 +2642,12 @@ impl SettingsApp {
                             .clicked()
                         {
                             self.send(ToService::Quit);
-                            std::thread::sleep(Duration::from_millis(1500));
+                            // The new process waits for the old one to release
+                            // the lock (--after-update), so the UI never sleeps.
                             start_service(
                                 &self.exe,
                                 self.custom_config.then_some(self.config_path.as_path()),
+                                true,
                             );
                             self.last_attempt = None;
                         }
@@ -2651,6 +2664,7 @@ impl SettingsApp {
                         start_service(
                             &self.exe,
                             self.custom_config.then_some(self.config_path.as_path()),
+                            false,
                         );
                         self.last_attempt = None;
                     }
@@ -3089,6 +3103,20 @@ fn steps_editor(ui: &mut Ui, steps: &mut Vec<RawStep>, t: &T, id: &str) -> bool 
     changed
 }
 
+/// The key and action of `buttons` that writes control `cid`, if any.
+///
+/// The configuration may name a control as an alias (`back`) or as a number
+/// (`"0x00C3"`); the list shows the control id, so the lookup must too.
+fn action_for_control(
+    buttons: &BTreeMap<String, RawAction>,
+    cid: u16,
+) -> Option<(String, RawAction)> {
+    buttons
+        .iter()
+        .find(|(key, _)| parse_control(key) == Some(cid))
+        .map(|(key, action)| (key.clone(), action.clone()))
+}
+
 /// Every button action anywhere in the configuration (including menu items).
 fn all_actions(raw: &mut RawConfig) -> impl Iterator<Item = &mut RawAction> {
     let buttons = raw.profiles.iter_mut().flat_map(|p| {
@@ -3231,9 +3259,13 @@ fn key_display(name: &str) -> &str {
     }
 }
 
-/// Starts the background service (detached).
-fn start_service(exe: &Path, config: Option<&Path>) {
+/// Starts the background service (detached). With `after_update` the new
+/// copy waits for the previous one to release the single-instance lock.
+fn start_service(exe: &Path, config: Option<&Path>, after_update: bool) {
     let mut cmd = std::process::Command::new(exe);
+    if after_update {
+        cmd.arg("--after-update");
+    }
     if let Some(c) = config {
         cmd.arg("--config").arg(c);
     }
@@ -3485,6 +3517,18 @@ mod tests {
             raw.profiles[0].buttons["back"],
             RawAction::Disable
         ));
+    }
+
+    #[test]
+    fn finds_actions_written_with_a_number() {
+        let raw = RawConfig::parse(
+            "[[profile]]\nname = \"p\"\n[profile.buttons]\n\"0x00C3\" = { action = \"disable\" }",
+        )
+        .unwrap();
+        let (key, action) = action_for_control(&raw.profiles[0].buttons, 0xC3).expect("found");
+        assert_eq!(key, "0x00C3");
+        assert!(matches!(action, RawAction::Disable));
+        assert!(action_for_control(&raw.profiles[0].buttons, 0x53).is_none());
     }
 
     #[test]

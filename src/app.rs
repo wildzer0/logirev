@@ -135,9 +135,8 @@ pub fn run_service(opts: &ServiceOptions) -> Result<(), String> {
     })
     .map_err(|e| format!("cannot install Ctrl+C handler: {e}"))?;
     crate::foreground::watch(tx.clone());
-    if p.cfg.general.check_updates {
-        crate::update::spawn_checker(tx.clone());
-    }
+    crate::update::set_enabled(p.cfg.general.check_updates);
+    crate::update::spawn_checker(tx.clone());
     let ipc = start_ipc(&tx);
     let hooks = ipc.clone().map(|server| UiHooks {
         observer: Box::new(move |update| server.publish(&update)),

@@ -32,6 +32,13 @@ use crate::radial;
 /// The commented default configuration, written by `logirevctl init`.
 pub const TEMPLATE: &str = include_str!("../config/logirev.toml");
 
+/// Smallest and largest pointer-speed multiplier accepted by the firmware.
+///
+/// The firmware range ends at raw `0x01FF` (1.996×), so 2.0 is one step too
+/// far; the window and the documentation stop at 1.99.
+pub const POINTER_SPEED_MIN: f32 = 0.18;
+/// Largest pointer-speed multiplier accepted by the firmware (1.99×).
+pub const POINTER_SPEED_MAX: f32 = 1.99;
 /// Smallest and largest raw pointer speed accepted by the firmware.
 const POINTER_SPEED_RAW_RANGE: (u16, u16) = (0x002E, 0x01FF);
 /// Longest single pause in a `sequence`, and longest total pause, in ms.
@@ -746,6 +753,19 @@ impl Config {
     /// Validates an already parsed file.
     pub fn from_raw(raw: RawConfig, base_dir: &Path) -> Result<Self, String> {
         level_filter(&raw.logging.level)?;
+        parse_product_id(raw.general.product_id.as_deref())?;
+        if !matches!(raw.general.language.as_str(), "auto" | "en" | "it") {
+            return Err(format!(
+                "language must be \"auto\", \"en\" or \"it\" (found \"{}\")",
+                raw.general.language
+            ));
+        }
+        if !matches!(raw.general.theme.as_str(), "system" | "light" | "dark") {
+            return Err(format!(
+                "theme must be \"system\", \"light\" or \"dark\" (found \"{}\")",
+                raw.general.theme
+            ));
+        }
         if raw.general.battery_warning > 100 {
             return Err("battery_warning must be between 0 and 100".into());
         }
@@ -795,14 +815,19 @@ impl Config {
 
     /// The requested product id, parsed from hex.
     pub fn product_id(&self) -> Result<Option<u16>, String> {
-        match self.general.product_id.as_deref().map(str::trim) {
-            None | Some("") | Some("auto") => Ok(None),
-            Some(s) => {
-                let hex = s.rsplit(':').next().unwrap_or(s).trim_start_matches("0x");
-                u16::from_str_radix(hex, 16)
-                    .map(Some)
-                    .map_err(|_| format!("invalid product_id \"{s}\""))
-            }
+        parse_product_id(self.general.product_id.as_deref())
+    }
+}
+
+/// Parses the `product_id` setting (`"auto"`, `""`, `"c548"`, `"046d:c548"`).
+fn parse_product_id(value: Option<&str>) -> Result<Option<u16>, String> {
+    match value.map(str::trim) {
+        None | Some("") | Some("auto") => Ok(None),
+        Some(s) => {
+            let hex = s.rsplit(':').next().unwrap_or(s).trim_start_matches("0x");
+            u16::from_str_radix(hex, 16)
+                .map(Some)
+                .map_err(|_| format!("invalid product_id \"{s}\""))
         }
     }
 }
@@ -871,9 +896,16 @@ impl Profile {
         let ctx = |msg: String| format!("profile \"{name}\": {msg}");
 
         let mut buttons = BTreeMap::new();
+        let mut seen: BTreeMap<u16, String> = BTreeMap::new();
         for (key, action) in raw.buttons {
             let cid =
                 parse_control(&key).ok_or_else(|| ctx(format!("unknown button \"{key}\"")))?;
+            if let Some(previous) = seen.get(&cid) {
+                return Err(ctx(format!(
+                    "button \"{key}\" is the same control as \"{previous}\" ({cid:#06x})"
+                )));
+            }
+            seen.insert(cid, key.clone());
             if let Some(a) = validate_action(action, false, false, macros, menus)
                 .map_err(|e| ctx(format!("button \"{key}\": {e}")))?
             {
@@ -889,9 +921,17 @@ impl Profile {
                 ));
             }
             let mut map = BTreeMap::new();
+            let mut seen: BTreeMap<u16, String> = BTreeMap::new();
             for (key, action) in app.buttons {
                 let cid =
                     parse_control(&key).ok_or_else(|| ctx(format!("unknown button \"{key}\"")))?;
+                if let Some(previous) = seen.get(&cid) {
+                    return Err(ctx(format!(
+                        "app {:?}: button \"{key}\" is the same control as \"{previous}\" ({cid:#06x})",
+                        app.programs
+                    )));
+                }
+                seen.insert(cid, key.clone());
                 let a = validate_action(action, false, false, macros, menus)
                     .map_err(|e| ctx(format!("app {:?}, button \"{key}\": {e}", app.programs)))?;
                 map.insert(cid, a);
@@ -1258,9 +1298,7 @@ fn speed_to_raw(multiplier: f32) -> Result<u16, String> {
     let raw = (multiplier * 256.0).round();
     if !(f32::from(lo)..=f32::from(hi)).contains(&raw) {
         return Err(format!(
-            "pointer speed {multiplier} out of range ({:.2} .. {:.2})",
-            f32::from(lo) / 256.0,
-            f32::from(hi) / 256.0
+            "pointer speed {multiplier} out of range ({POINTER_SPEED_MIN:.2} .. {POINTER_SPEED_MAX:.2})"
         ));
     }
     Ok(raw as u16)
@@ -1324,6 +1362,37 @@ mod tests {
     }
 
     #[test]
+    fn rejects_invalid_general_values() {
+        let bad = |t: &str| parse(t).is_err();
+        assert!(bad("[general]\nproduct_id = \"zzzz\""));
+        assert!(bad("[general]\nlanguage = \"de\""));
+        assert!(bad("[general]\ntheme = \"blue\""));
+        assert!(parse(
+            "[general]\nproduct_id = \"046d:c548\"\nlanguage = \"it\"\ntheme = \"dark\""
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn rejects_the_same_button_twice() {
+        let err = parse(
+            "[[profile]]\nname = \"p\"\nbuttons.back = { action = \"disable\" }\nbuttons.\"0x53\" = { action = \"disable\" }",
+        )
+        .unwrap_err();
+        assert!(err.contains("same control"), "{err}");
+        let err = parse(
+            "[[profile]]\nname = \"p\"\nbuttons.precision = { action = \"disable\" }\nbuttons.dpi_switch = { action = \"disable\" }",
+        )
+        .unwrap_err();
+        assert!(err.contains("same control"), "{err}");
+        let err = parse(
+            "[[profile]]\nname = \"p\"\n[[profile.app]]\nmatch = [\"x\"]\nbuttons.back = { action = \"disable\" }\nbuttons.\"0x53\" = { action = \"disable\" }",
+        )
+        .unwrap_err();
+        assert!(err.contains("same control"), "{err}");
+    }
+
+    #[test]
     fn first_matching_profile_wins() {
         let cfg = parse(
             r#"
@@ -1371,6 +1440,9 @@ mod tests {
     fn converts_speed() {
         assert_eq!(speed_to_raw(1.0), Ok(256));
         assert_eq!(speed_to_raw(0.5), Ok(128));
+        assert!(speed_to_raw(POINTER_SPEED_MIN).is_ok());
+        assert!(speed_to_raw(POINTER_SPEED_MAX).is_ok());
+        assert!(speed_to_raw(2.0).is_err(), "2.0 is past the firmware limit");
     }
 
     #[test]

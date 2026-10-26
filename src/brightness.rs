@@ -158,6 +158,8 @@ mod imp {
     use std::fs;
     use std::path::PathBuf;
 
+    use log::warn;
+
     use super::target;
     use crate::config::BrightnessChange;
 
@@ -178,14 +180,25 @@ mod imp {
         };
         let mut done = 0;
         for dir in dirs {
-            let (cur, max) = (
-                read(dir.join("brightness"))?,
-                read(dir.join("max_brightness"))?,
-            );
+            let (cur, max) = match (
+                read(dir.join("brightness")),
+                read(dir.join("max_brightness")),
+            ) {
+                (Ok(cur), Ok(max)) => (cur, max),
+                (Err(e), _) | (_, Err(e)) => {
+                    warn!("{e}");
+                    continue;
+                }
+            };
             let new = target(change, 0, cur, max);
-            fs::write(dir.join("brightness"), new.to_string())
-                .map_err(|e| format!("{}: {e} (see README: Linux permissions)", dir.display()))?;
+            if let Err(e) = fs::write(dir.join("brightness"), new.to_string()) {
+                warn!("{}: {e} (see README: Linux permissions)", dir.display());
+                continue;
+            }
             done += 1;
+        }
+        if done == 0 {
+            return Err("no screen with a writable backlight".into());
         }
         Ok(format!("{done} backlight(s) changed"))
     }
