@@ -3,6 +3,18 @@
 All notable changes are listed here. Versions follow
 [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Added
+- Battery refresh: the daemon re-reads a connected device's battery every
+  minute, and the device page / device rows have a **Refresh battery**
+  button. The UI shows how old the reading is.
+
+### Fixed
+- The battery level no longer stays at the value read when the device
+  connected: spontaneous reports are still honoured, but a periodic
+  `0x1004` query keeps the level, tray bar and low-battery warning current.
+
 ## [1.5.1] — 2026-10-26
 
 ### Changed

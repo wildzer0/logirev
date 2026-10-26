@@ -291,6 +291,7 @@ mod tests {
             online,
             battery: battery.map(Into::into),
             battery_level: None,
+            battery_age: None,
             dpi: online.then_some(750),
             profile: Some("MX Ergo".into()),
             remapped: 5,

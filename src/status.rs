@@ -65,6 +65,9 @@ pub struct DeviceStatus {
     /// Battery level in percent, and whether it is charging.
     #[serde(default)]
     pub battery_level: Option<(u8, bool)>,
+    /// Seconds since the battery was last read, when known.
+    #[serde(default)]
+    pub battery_age: Option<u64>,
     /// Current DPI, if adjustable.
     pub dpi: Option<u16>,
     /// Name of the profile applied, if any.
@@ -268,6 +271,7 @@ mod tests {
             online,
             battery: battery.map(Into::into),
             battery_level: None,
+            battery_age: None,
             dpi: None,
             profile: None,
             remapped: 0,

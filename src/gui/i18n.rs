@@ -443,6 +443,9 @@ texts! {
     theme_dark => "Dark", "Scuro";
     start_with_windows => "Start with Windows", "Avvia con Windows";
     battery_warning => "Warn when the battery drops to", "Avvisa quando la batteria scende al";
+    refresh_battery => "Refresh battery", "Aggiorna batteria";
+    battery_updated => "battery updated {}", "batteria aggiornata {}";
+    just_now => "now", "ora";
     off => "Off", "Disattivato";
     log_level => "Log detail", "Dettaglio del log";
     files => "Files", "File";

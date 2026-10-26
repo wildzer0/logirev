@@ -90,6 +90,13 @@ pub enum ToService {
         /// Receiver slot of the device to remove.
         slot: u8,
     },
+    /// Read one device's battery now.
+    RefreshBattery {
+        /// Receiver, as `LinkStatus::key`.
+        link: String,
+        /// Receiver slot of the device.
+        slot: u8,
+    },
     /// Stop the service.
     Quit,
 }
@@ -439,6 +446,9 @@ impl Server {
                         }
                         ToService::StopPairing { link } => Event::StopPairing { link },
                         ToService::Unpair { link, slot } => Event::Unpair { link, slot },
+                        ToService::RefreshBattery { link, slot } => {
+                            Event::RefreshBattery { link, slot }
+                        }
                         ToService::Quit => Event::Quit,
                     };
                     if tx.send(event).is_err() {

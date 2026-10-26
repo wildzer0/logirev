@@ -93,6 +93,12 @@ const RESCAN_DEBOUNCE: Duration = Duration::from_millis(500);
 const TRAFFIC_EVERY: Duration = Duration::from_millis(400);
 /// How long a radial menu waits for a choice before it is forgotten.
 const RADIAL_TIMEOUT: Duration = Duration::from_secs(20);
+/// How often a connected device's battery is read again.
+const BATTERY_REFRESH: Duration = Duration::from_secs(60);
+/// Retry delay after a battery read failed (asleep, busy).
+const BATTERY_RETRY: Duration = Duration::from_secs(120);
+/// A battery query must never stall the daemon.
+const BATTERY_TIMEOUT: Duration = Duration::from_millis(500);
 /// Timeout used while identifying and configuring a device. A device that
 /// falls asleep mid-setup must not block the event loop for seconds per
 /// request; the backoff retries it when it wakes up.
@@ -142,6 +148,13 @@ pub enum Event {
         /// Receiver, as [`LinkStatus::key`].
         link: String,
         /// Receiver slot of the device to remove.
+        slot: u8,
+    },
+    /// Read one device's battery now (settings window button).
+    RefreshBattery {
+        /// Receiver, as [`LinkStatus::key`].
+        link: String,
+        /// Receiver slot of the device.
         slot: u8,
     },
     /// A newer version is published (from the update checker).
@@ -387,6 +400,29 @@ impl Daemon {
                         if let Some(l) = self.links.iter_mut().find(|l| l.key == link) {
                             l.unpair(&mut ctx, slot);
                         }
+                    }
+                    Event::RefreshBattery { link, slot } => {
+                        let mut ctx = ctx!(self);
+                        let ok = self
+                            .links
+                            .iter_mut()
+                            .find(|l| l.key == link)
+                            .is_some_and(|l| l.refresh_battery(&mut ctx, slot));
+                        if !ok {
+                            let italian = crate::locale::italian(&ctx.cfg.general.language);
+                            ctx.notices.push((
+                                crate::locale::pick(italian, "Battery", "Batteria").into(),
+                                crate::locale::pick(
+                                    italian,
+                                    "Battery status is not available (device asleep?).",
+                                    "Stato batteria non disponibile (periferica inattiva?).",
+                                )
+                                .into(),
+                            ));
+                        }
+                        let (notices, switch_all, radial, radial_release) =
+                            (ctx.notices, ctx.switch_all, ctx.radial, ctx.radial_release);
+                        self.finish_effects(notices, switch_all, radial, radial_release);
                     }
                     Event::RadialSelect { id, index } => self.radial_select(id, index),
                     Event::RadialCancel { id } => {
@@ -794,6 +830,10 @@ struct Session {
     name: String,
     kind: DeviceKind,
     battery: Option<Battery>,
+    /// When the battery was last read.
+    battery_seen: Option<Instant>,
+    /// Next scheduled battery read.
+    battery_due: Instant,
     /// Index into `Config::profiles` of the applied profile, if one matched.
     profile: Option<usize>,
     features: FeatureTable,
@@ -943,6 +983,7 @@ impl Link {
                 online: true,
                 battery: s.battery.map(|b| b.to_string()),
                 battery_level: s.battery.map(|b| (b.percent, b.charging)),
+                battery_age: s.battery_seen.map(|seen| seen.elapsed().as_secs()),
                 dpi: s.base_dpi,
                 profile: s
                     .profile
@@ -964,6 +1005,7 @@ impl Link {
                     online: false,
                     battery: None,
                     battery_level: None,
+                    battery_age: None,
                     dpi: None,
                     remapped: 0,
                     hosts: None,
@@ -1049,6 +1091,7 @@ impl Link {
             }
             self.run_due_setups(ctx);
             self.run_due_repeats(ctx);
+            self.refresh_due_batteries(ctx);
             if self.pairing.as_mut().is_some_and(Pairing::check_timeout) {
                 self.changed = true;
             }
@@ -1256,12 +1299,76 @@ impl Link {
             Battery::from_legacy(params)
         };
         if let Some(b) = parsed {
+            let now = Instant::now();
+            s.battery_seen = Some(now);
+            s.battery_due = now + BATTERY_REFRESH;
             if s.battery != Some(b) {
                 debug!("slot {slot}: battery {b}");
                 s.battery = Some(b);
                 self.changed = true;
             }
             self.check_battery(ctx, slot);
+        } else {
+            s.battery_due = Instant::now() + BATTERY_RETRY;
+        }
+    }
+
+    /// Refreshes batteries whose scheduled read is due.
+    fn refresh_due_batteries(&mut self, ctx: &mut Ctx) {
+        let now = Instant::now();
+        let pending = &self.pending;
+        let due: Vec<u8> = self
+            .sessions
+            .iter()
+            .filter(|(slot, s)| {
+                s.battery_index.is_some() && s.battery_due <= now && !pending.contains_key(slot)
+            })
+            .map(|(slot, _)| *slot)
+            .collect();
+        for slot in due {
+            self.refresh_battery(ctx, slot);
+        }
+    }
+
+    /// Reads one device's battery now, with a short timeout so the daemon
+    /// cannot get stuck on a sleeping device.
+    fn refresh_battery(&mut self, ctx: &mut Ctx, slot: u8) -> bool {
+        let Some(session) = self.sessions.get(&slot) else {
+            return false;
+        };
+        if session.battery_index.is_none() {
+            return false;
+        }
+        let features = session.features.clone();
+        let old_timeout = self.t.timeout;
+        self.t.timeout = BATTERY_TIMEOUT;
+        let result = {
+            let mut dev = Device::new(&mut self.t, slot, &features);
+            dev.battery()
+        };
+        self.t.timeout = old_timeout;
+        let now = Instant::now();
+        let Some(session) = self.sessions.get_mut(&slot) else {
+            return false;
+        };
+        session.battery_due = now
+            + if result.is_ok() {
+                BATTERY_REFRESH
+            } else {
+                BATTERY_RETRY
+            };
+        match result {
+            Ok(battery) => {
+                session.battery_seen = Some(now);
+                session.battery = Some(battery);
+                self.changed = true;
+                self.check_battery(ctx, slot);
+                true
+            }
+            Err(e) => {
+                debug!("slot {slot}: battery refresh failed: {e}");
+                false
+            }
         }
     }
 
@@ -1673,6 +1780,13 @@ impl Link {
             name: name.clone(),
             kind,
             battery,
+            battery_seen: battery.map(|_| Instant::now()),
+            battery_due: Instant::now()
+                + if battery.is_some() {
+                    BATTERY_REFRESH
+                } else {
+                    BATTERY_RETRY
+                },
             profile: None,
             features: features.clone(),
             controls: Vec::new(),

@@ -1082,6 +1082,23 @@ impl SettingsApp {
                         {
                             self.confirm_unpair = Some((link.key.clone(), d.slot, d.name.clone()));
                         }
+                        if d.online
+                            && d.battery.is_some()
+                            && ui
+                                .add(
+                                    egui::Button::new(
+                                        RichText::new(icon::ARROWS_CLOCKWISE).size(14.0),
+                                    )
+                                    .frame(false),
+                                )
+                                .on_hover_text(t.refresh_battery)
+                                .clicked()
+                        {
+                            self.send(ToService::RefreshBattery {
+                                link: link.key.clone(),
+                                slot: d.slot,
+                            });
+                        }
                         if d.online && ui.button(t.open).clicked() {
                             self.page = Page::Device {
                                 link: link.key.clone(),
@@ -1559,6 +1576,31 @@ impl SettingsApp {
                     if let Some(b) = &d.battery {
                         let (ic, color) = style::battery_icon(b);
                         ui.label(RichText::new(format!("{ic} {b}")).color(color));
+                        if ui
+                            .add(
+                                egui::Button::new(RichText::new(icon::ARROWS_CLOCKWISE).size(14.0))
+                                    .frame(false),
+                            )
+                            .on_hover_text(t.refresh_battery)
+                            .clicked()
+                        {
+                            self.send(ToService::RefreshBattery {
+                                link: link.to_owned(),
+                                slot,
+                            });
+                        }
+                        if let Some(age) = d.battery_age {
+                            let age = if age < 5 {
+                                t.just_now.to_owned()
+                            } else {
+                                short_age(age)
+                            };
+                            ui.label(
+                                RichText::new(fill(t.battery_updated, &[&age]))
+                                    .small()
+                                    .color(pal.muted),
+                            );
+                        }
                     }
                     if !details.firmware.is_empty() {
                         ui.label(
@@ -3753,6 +3795,19 @@ fn shorten_text(text: &str, max: usize) -> String {
     out
 }
 
+/// "now", "42s", "3m", "2h" or "4d".
+fn short_age(seconds: u64) -> String {
+    if seconds < 60 {
+        format!("{seconds}s")
+    } else if seconds < 3600 {
+        format!("{}m", seconds / 60)
+    } else if seconds < 86_400 {
+        format!("{}h", seconds / 3600)
+    } else {
+        format!("{}d", seconds / 86_400)
+    }
+}
+
 /// A small painted service-status dot (not a text glyph).
 fn status_dot(ui: &mut Ui, ok: bool, tooltip: &str) {
     let (rect, response) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), Sense::hover());
@@ -4153,6 +4208,7 @@ fn demo_snapshot() -> Snapshot {
         battery: battery.map(Into::into),
         battery_level: battery
             .and_then(|b| b.trim_end_matches('%').parse().ok().map(|p| (p, false))),
+        battery_age: battery.map(|_| 12),
         dpi: online.then_some(750),
         profile: Some("MX Ergo".into()),
         remapped: if online { 5 } else { 0 },
