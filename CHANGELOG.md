@@ -3,7 +3,7 @@
 All notable changes are listed here. Versions follow
 [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
+## [1.5.1] — 2026-10-26
 
 ### Changed
 - The settings window has a fixed size, so the layout no longer moves while
