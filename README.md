@@ -193,8 +193,9 @@ icon and a notification when charging is complete; wheel speed and smooth
 scrolling for every mouse; export and import of all your settings.
 
 **Radial menus** (*Radial menus*): up to eight custom actions in a ring that
-opens under the pointer, assigned to a button of a mouse or trackball. To
-look at the menu without a receiver, run `logirev.exe --radial-demo`.
+opens under the pointer, assigned to a button of a mouse or trackball. The
+settings page shows a live preview of each menu. To look at the real menu
+without a receiver, run `logirev.exe --radial-demo`.
 
 **Developer mode** (*Settings → Developer mode*) adds a *Technical* tab to
 each device: serial number, firmware components, every feature (including

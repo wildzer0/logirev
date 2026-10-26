@@ -3,13 +3,17 @@
 All notable changes are listed here. Versions follow
 [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
+## [1.4.1] — 2026-10-26
+
+### Added
+- **Live preview** of a radial menu under each menu in the *Radial menus*
+  page: the wheel, icons, labels and title are drawn with the same painter
+  as the Windows overlay; hover a wedge to see the highlight.
 
 ### Changed
 - Radial menu redesign: a frosted panel with separated wedges, larger
-  labels and icons, a clearer hover highlight, and a **live preview** under
-  each menu in the *Radial menus* page (hover a wedge in the preview).
-- The menus page shows the item count against the limit (8).
+  labels and icons and a clearer hover rim.
+- The menus page shows the item count against the limit (`n/8`).
 
 ### Fixed
 - Radial menu items are now chosen when the left mouse button is **released**
