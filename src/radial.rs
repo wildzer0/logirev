@@ -121,6 +121,11 @@ impl Metrics {
         }
     }
 
+    /// Outer radius of the visible panel (the ring plus its rim).
+    pub fn panel_radius(&self) -> f32 {
+        self.radius + PANEL_DIP * self.scale
+    }
+
     /// Width and height of the picture, panel and shadow included.
     pub fn frame_size(&self) -> (u32, u32) {
         let half = (self.radius + PANEL_DIP * self.scale + self.shadow + 2.0 * self.scale).ceil();

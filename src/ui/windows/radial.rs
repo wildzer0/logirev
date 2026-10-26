@@ -34,7 +34,9 @@ use windows_sys::Win32::Graphics::Gdi::{
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, GetDpiForSystem, MDT_EFFECTIVE_DPI};
-use windows_sys::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+    GetAsyncKeyState, ReleaseCapture, SetCapture, VK_LBUTTON, VK_MBUTTON, VK_RBUTTON,
+};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetCursorPos, GetMessageW, KillTimer,
     LoadCursorW, PostQuitMessage, RegisterClassW, SetTimer, ShowWindow, TranslateMessage,
@@ -53,6 +55,7 @@ const CLASS: &str = "logirev.radial";
 /// Fade-in timer and safety timeout.
 const TIMER_FADE: usize = 1;
 const TIMER_TIMEOUT: usize = 2;
+const TIMER_OUTSIDE: usize = 3;
 /// How long the menu waits before closing itself (the service has the same
 /// limit; whichever comes first wins).
 const VISIBLE_MS: u32 = 20_000;
@@ -174,6 +177,8 @@ struct Open {
     opened_cursor: POINT,
     /// The left button went down over a sector (the choice is made on release).
     press_inside: bool,
+    /// State of the mouse buttons at the last outside-click check.
+    buttons_down: bool,
     center: POINT,
     size: (u32, u32),
     hover: Option<usize>,
@@ -352,6 +357,7 @@ fn show_at(hwnd: HWND, menu: &RadialMenu, tx: Option<&Sender<Event>>, demo: bool
         origin,
         opened_cursor: cursor,
         press_inside: false,
+        buttons_down: false,
         center: POINT {
             x: origin.x + width as i32 / 2,
             y: origin.y + height as i32 / 2,
@@ -384,6 +390,9 @@ fn show_at(hwnd: HWND, menu: &RadialMenu, tx: Option<&Sender<Event>>, demo: bool
         SetCapture(hwnd);
         SetTimer(hwnd, TIMER_FADE, 15, None);
         SetTimer(hwnd, TIMER_TIMEOUT, VISIBLE_MS, None);
+        // Fallback for clicks outside the window: Windows does not always
+        // deliver them to a no-activate window, even with the mouse captured.
+        SetTimer(hwnd, TIMER_OUTSIDE, 15, None);
     }
     debug!("radial menu shown at ({}, {})", origin.x, origin.y);
 }
@@ -527,6 +536,7 @@ fn close(selected: Option<usize>) {
         ReleaseCapture();
         KillTimer(open.hwnd, TIMER_FADE);
         KillTimer(open.hwnd, TIMER_TIMEOUT);
+        KillTimer(open.hwnd, TIMER_OUTSIDE);
         ShowWindow(open.hwnd, SW_HIDE);
     }
     if let Some(tx) = &open.tx {
@@ -559,6 +569,7 @@ fn drop_open(tell: bool) {
             ReleaseCapture();
             KillTimer(open.hwnd, TIMER_FADE);
             KillTimer(open.hwnd, TIMER_TIMEOUT);
+            KillTimer(open.hwnd, TIMER_OUTSIDE);
             ShowWindow(open.hwnd, SW_HIDE);
         }
     }
@@ -847,6 +858,33 @@ unsafe extern "system" fn window_proc(
                     }
                 }
                 TIMER_TIMEOUT => close(None),
+                TIMER_OUTSIDE => {
+                    let close_now = OPEN.with(|state| {
+                        let mut state = state.borrow_mut();
+                        let Some(open) = state.as_mut() else {
+                            return false;
+                        };
+                        let mut cursor = POINT { x: 0, y: 0 };
+                        // SAFETY: plain query.
+                        unsafe { GetCursorPos(&mut cursor) };
+                        let dx = (cursor.x - open.center.x) as f32;
+                        let dy = (cursor.y - open.center.y) as f32;
+                        let visible = open.metrics.panel_radius();
+                        let outside = dx * dx + dy * dy > visible * visible;
+                        // SAFETY: plain query of the physical mouse buttons.
+                        let down = unsafe {
+                            (GetAsyncKeyState(i32::from(VK_LBUTTON)) as u16 & 0x8000 != 0)
+                                || (GetAsyncKeyState(i32::from(VK_RBUTTON)) as u16 & 0x8000 != 0)
+                                || (GetAsyncKeyState(i32::from(VK_MBUTTON)) as u16 & 0x8000 != 0)
+                        };
+                        let changed = down != open.buttons_down;
+                        open.buttons_down = down;
+                        outside && changed
+                    });
+                    if close_now {
+                        close(None);
+                    }
+                }
                 _ => {}
             }
             0

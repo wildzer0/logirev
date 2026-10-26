@@ -5,6 +5,12 @@ All notable changes are listed here. Versions follow
 
 ## [Unreleased]
 
+### Fixed
+- The radial menu now closes when clicking **outside** the wheel, including
+  on the transparent shadow: Windows does not always deliver an outside
+  click to a window that never takes the focus, so a short fallback timer
+  watches the mouse buttons while the menu is open.
+
 ### Added
 - New `lock` action (and the *Lock the PC* preset) that locks the screen
   through the system (`LockWorkStation` on Windows, the session manager or

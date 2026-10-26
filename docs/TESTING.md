@@ -214,3 +214,4 @@ latest published release (e.g. set `version = "0.9.0"` locally).
 | Q14 | Choose "Back", "Forward" and a middle click from the menu in a browser / editor | Each action runs after the left button is released; no action starts while the mouse button is still down. |
 | Q15 | Add a ninth item | The *Add item* button is replaced by "A menu can have at most eight items"; the configuration refuses a ninth item too. |
 | Q16 | Add the *Lock the PC* preset to a menu (or a button) and choose it | Windows locks at once; on Linux the session manager or screen locker locks. Unlike the old `Win+L` simulation, it works from a simulated action. |
+| Q17 | Open the menu and click on another window, on the desktop, or on the transparent shadow around the wheel | The menu closes without choosing anything; the click still reaches the window under the pointer. |
