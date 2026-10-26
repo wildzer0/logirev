@@ -93,6 +93,10 @@ const RESCAN_DEBOUNCE: Duration = Duration::from_millis(500);
 const TRAFFIC_EVERY: Duration = Duration::from_millis(400);
 /// How long a radial menu waits for a choice before it is forgotten.
 const RADIAL_TIMEOUT: Duration = Duration::from_secs(20);
+/// Timeout used while identifying and configuring a device. A device that
+/// falls asleep mid-setup must not block the event loop for seconds per
+/// request; the backoff retries it when it wakes up.
+const SETUP_TIMEOUT: Duration = Duration::from_millis(800);
 
 /// Something the event loop must react to.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -645,6 +649,9 @@ impl Daemon {
             log::set_max_level(level);
         }
         self.cfg = new;
+        // Remember the file we just read: the two-second watcher must not
+        // reload it again after an explicit Reload from the window.
+        self.config_mtime = mtime(&self.config_path);
         crate::update::set_enabled(self.cfg.general.check_updates);
         let mut ctx = ctx!(self);
         for link in &mut self.links {
@@ -1012,7 +1019,10 @@ impl Link {
         // probing each slot if this receiver does not support it.
         if let Err(e) = t.write_register(REG_CONNECTION_STATE, &[0x02, 0x00, 0x00]) {
             debug!("connection re-announce not supported ({e}), probing slots");
+            let old = t.timeout;
+            t.timeout = SETUP_TIMEOUT;
             let alive: Vec<u8> = (1..=6).filter(|&s| t.ping(s).is_some()).collect();
+            t.timeout = old;
             for slot in alive {
                 self.schedule(slot, Duration::ZERO);
             }
@@ -1606,7 +1616,25 @@ impl Link {
     }
 
     /// Identifies the device in `slot` and applies its profile.
+    ///
+    /// Uses a shorter timeout than ordinary requests: this runs on the
+    /// event-loop thread, and a sleeping device must not stall every other
+    /// device for 1.5 s per message.
     fn setup(&mut self, cfg: &Config, app: Option<&str>, slot: u8) -> Result<Session, HidppError> {
+        let old = self.t.timeout;
+        self.t.timeout = SETUP_TIMEOUT;
+        let result = self.setup_inner(cfg, app, slot);
+        self.t.timeout = old;
+        result
+    }
+
+    fn setup_inner(
+        &mut self,
+        cfg: &Config,
+        app: Option<&str>,
+        slot: u8,
+    ) -> Result<Session, HidppError> {
+        let started = Instant::now();
         let t = &mut self.t;
         let (major, minor) = t.ping(slot).ok_or(HidppError::Timeout)?;
         if major < 2 {
@@ -1674,6 +1702,7 @@ impl Link {
         if cfg.general.developer {
             session.details.tech = Some(diagnostics::read(t, slot, &features));
         }
+        debug!("slot {slot}: configured in {:?}", started.elapsed());
         Ok(session)
     }
 

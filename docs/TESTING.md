@@ -16,9 +16,9 @@ folder (e.g. `C:\Tools\logirev\`, not a `\\wsl.localhost` path).
 |---|---|---|
 | A1 | Double-click `logirev.exe` | No console window; a blue round icon appears next to the clock (or under `^`). |
 | A2 | Hover the icon | Tooltip `logirev — MX Ergo S 30%` (your devices and battery). |
-| A3 | Left-click the icon | The devices window opens: every paired slot, connected ones with battery, DPI, profile, number of remapped buttons. |
+| A3 | Left-click the icon | The settings window opens on *Devices*: a card for every paired slot, connected ones with battery and remapped buttons. (In a build without the window, `--no-default-features`, the native device list opens instead.) |
 | A4 | Close the window, right-click the icon | Menu: logirev version, receiver, one line per slot (✓ = connected), commands. |
-| A5 | Double-click `logirev.exe` again | Message "logirev is already running". |
+| A5 | Double-click `logirev.exe` again | The settings window opens (or comes to the front); only one tray icon and one service remain. In a build without the window it shows "logirev is already running". |
 | A6 | Task Manager → Details → `logirev.exe` | Memory under ~10 MB, CPU 0 % while idle. |
 
 ## B. Plug & play

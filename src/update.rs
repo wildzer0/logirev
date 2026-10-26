@@ -130,8 +130,32 @@ pub fn compare_versions(a: &str, b: &str) -> Ordering {
         (None, None) => Ordering::Equal,
         (None, Some(_)) => Ordering::Greater,
         (Some(_), None) => Ordering::Less,
-        (Some(x), Some(y)) => x.cmp(y),
+        (Some(x), Some(y)) => compare_prerelease(x, y),
     })
+}
+
+/// Semver prerelease order: dot-separated identifiers, numeric ones compared
+/// as numbers (so `rc.10` is newer than `rc.9`), numeric before alphanumeric.
+fn compare_prerelease(a: &str, b: &str) -> Ordering {
+    let (mut ai, mut bi) = (a.split('.'), b.split('.'));
+    loop {
+        match (ai.next(), bi.next()) {
+            (None, None) => return Ordering::Equal,
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some(x), Some(y)) => {
+                let ord = match (x.parse::<u64>(), y.parse::<u64>()) {
+                    (Ok(x), Ok(y)) => x.cmp(&y),
+                    (Ok(_), Err(_)) => Ordering::Less,
+                    (Err(_), Ok(_)) => Ordering::Greater,
+                    (Err(_), Err(_)) => x.cmp(y),
+                };
+                if ord != Ordering::Equal {
+                    return ord;
+                }
+            }
+        }
+    }
 }
 
 /// Whether this build can install updates by itself.
@@ -306,6 +330,22 @@ mod tests {
         );
         assert_eq!(compare_versions("0.9.9", "1.0.0"), Ordering::Less);
         assert_eq!(compare_versions("1.10.0", "1.9.0"), Ordering::Greater);
+        assert_eq!(
+            compare_versions("1.0.0-rc.10", "1.0.0-rc.9"),
+            Ordering::Greater
+        );
+        assert_eq!(
+            compare_versions("1.0.0-alpha", "1.0.0-alpha.1"),
+            Ordering::Less
+        );
+        assert_eq!(
+            compare_versions("1.0.0-alpha.1", "1.0.0-alpha.beta"),
+            Ordering::Less
+        );
+        assert_eq!(
+            compare_versions("1.0.0-beta.2", "1.0.0-beta.11"),
+            Ordering::Less
+        );
     }
 
     /// Talks to the real GitHub API: `cargo test -- --ignored live`.

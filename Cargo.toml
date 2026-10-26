@@ -1,6 +1,6 @@
 [package]
 name = "logirev"
-version = "1.4.0-rc.1"
+version = "1.4.0"
 edition = "2021"
 rust-version = "1.95"
 description = "Portable background daemon that configures Logitech HID++ devices (Bolt / Unifying receivers) without Logi Options+"
@@ -43,6 +43,7 @@ windows-sys = { version = "0.59", features = [
     "Win32_Graphics_Gdi",
     "Win32_Networking_WinHttp",
     "Win32_Security",
+    "Win32_Security_Cryptography",
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_LibraryLoader",
     "Win32_System_Registry",

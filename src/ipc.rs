@@ -18,8 +18,8 @@ use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 use std::io::{self, BufRead, BufReader, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
@@ -106,18 +106,96 @@ struct Discovery {
 /// Windows, `$XDG_RUNTIME_DIR/logirev` on Linux).
 pub fn runtime_dir() -> PathBuf {
     #[cfg(windows)]
-    let base = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
-    #[cfg(not(windows))]
-    let base = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from);
-    base.unwrap_or_else(std::env::temp_dir).join("logirev")
+    {
+        std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir)
+            .join("logirev")
+    }
+    #[cfg(target_os = "linux")]
+    {
+        // Without a per-session runtime directory (cron, some SSH sessions)
+        // fall back to a folder that only this user can enter, never a
+        // shared /tmp/logirev.
+        match std::env::var_os("XDG_RUNTIME_DIR") {
+            Some(dir) => PathBuf::from(dir).join("logirev"),
+            None => std::env::temp_dir().join(format!("logirev-{}", unsafe { libc::getuid() })),
+        }
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        std::env::var_os("XDG_RUNTIME_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir)
+            .join("logirev")
+    }
 }
+
+/// Creates the runtime directory, private to this user (0700 on Linux).
+fn create_private_dir(path: &Path) -> io::Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+        if let Ok(meta) = std::fs::symlink_metadata(path) {
+            if meta.file_type().is_symlink() || !meta.is_dir() {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    format!("{} is not a private directory", path.display()),
+                ));
+            }
+            if meta.uid() != unsafe { libc::getuid() } {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    format!("{} belongs to another user", path.display()),
+                ));
+            }
+        }
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(path)?;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        std::fs::create_dir_all(path)
+    }
+}
+
+/// Writes the discovery file, readable only by this user (0600 on Linux).
+fn write_private(path: &Path, data: &[u8]) -> io::Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(path)?;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+        file.write_all(data)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        std::fs::write(path, data)
+    }
+}
+
+/// Most settings windows (and probes) served at once.
+const MAX_CLIENTS: usize = 8;
 
 fn discovery_path() -> PathBuf {
     runtime_dir().join("service.json")
 }
 
-/// A random secret, from the operating system's random hasher keys.
+/// A random secret from the operating system, or a hasher/time fallback.
 fn random_token() -> String {
+    let mut bytes = [0u8; 16];
+    if os_random(&mut bytes) {
+        return bytes.iter().map(|b| format!("{b:02x}")).collect();
+    }
     let part = || {
         let mut h = RandomState::new().build_hasher();
         h.write_u128(
@@ -131,6 +209,47 @@ fn random_token() -> String {
     format!("{:016x}{:016x}", part(), part())
 }
 
+#[cfg(target_os = "linux")]
+fn os_random(buf: &mut [u8]) -> bool {
+    use std::io::Read;
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| f.read_exact(buf))
+        .is_ok()
+}
+
+#[cfg(windows)]
+fn os_random(buf: &mut [u8]) -> bool {
+    use windows_sys::Win32::Security::Cryptography::{
+        BCryptGenRandom, BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+    };
+    // SAFETY: `buf` is valid for `buf.len()` bytes and the flags are the
+    // documented system RNG selector.
+    unsafe {
+        BCryptGenRandom(
+            std::ptr::null_mut(),
+            buf.as_mut_ptr(),
+            buf.len() as u32,
+            BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+        ) >= 0
+    }
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+fn os_random(_buf: &mut [u8]) -> bool {
+    false
+}
+
+/// Compares two secrets without stopping at the first different byte.
+fn tokens_equal(a: &str, b: &str) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.bytes()
+        .zip(b.bytes())
+        .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+        == 0
+}
+
 // ---------------------------------------------------------------------------
 // Service side
 // ---------------------------------------------------------------------------
@@ -141,10 +260,21 @@ struct Shared {
     changed: Condvar,
 }
 
+/// Decrements the open-connection count however `serve` ends.
+struct ClientGuard(Arc<AtomicUsize>);
+
+impl Drop for ClientGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
 /// The listening side, owned by the service. Cheap to clone.
 #[derive(Clone)]
 pub struct Server {
     shared: Arc<Shared>,
+    /// Connections accepted so far (including one still authenticating).
+    clients: Arc<AtomicUsize>,
 }
 
 impl Server {
@@ -159,10 +289,10 @@ impl Server {
             token: token.clone(),
             pid: std::process::id(),
         };
-        std::fs::create_dir_all(runtime_dir())?;
-        std::fs::write(
-            discovery_path(),
-            serde_json::to_vec(&info).map_err(io::Error::other)?,
+        create_private_dir(&runtime_dir())?;
+        write_private(
+            &discovery_path(),
+            &serde_json::to_vec(&info).map_err(io::Error::other)?,
         )?;
         debug!("settings window channel on 127.0.0.1:{port}");
 
@@ -170,14 +300,28 @@ impl Server {
             latest: Mutex::new((0, None)),
             changed: Condvar::new(),
         });
-        let server = Self { shared };
+        let clients = Arc::new(AtomicUsize::new(0));
+        let server = Self {
+            shared,
+            clients: Arc::clone(&clients),
+        };
         let accepting = server.clone();
         thread::Builder::new().name("ipc".into()).spawn(move || {
             for stream in listener.incoming().flatten() {
-                let (s, tx, token) = (accepting.clone(), tx.clone(), token.clone());
+                if clients.fetch_add(1, Ordering::Relaxed) >= MAX_CLIENTS {
+                    clients.fetch_sub(1, Ordering::Relaxed);
+                    warn!("refused a settings-window connection: too many open");
+                    continue;
+                }
+                let (s, tx, token, count) = (
+                    accepting.clone(),
+                    tx.clone(),
+                    token.clone(),
+                    Arc::clone(&clients),
+                );
                 let _ = thread::Builder::new()
                     .name("ipc-client".into())
-                    .spawn(move || s.serve(stream, &tx, &token));
+                    .spawn(move || s.serve(stream, &tx, &token, &count));
             }
         })?;
         Ok(server)
@@ -185,6 +329,11 @@ impl Server {
 
     /// Records a new state for the connected windows.
     pub fn publish(&self, update: &UiUpdate) {
+        // Serialising a large snapshot for nobody is wasted work (developer
+        // mode publishes every 400 ms).
+        if self.clients.load(Ordering::Relaxed) == 0 {
+            return;
+        }
         let UiUpdate::Snapshot(snapshot) = update else {
             return;
         };
@@ -202,19 +351,41 @@ impl Server {
     }
 
     /// One window: authenticate, then send snapshots and receive commands.
-    fn serve(&self, stream: TcpStream, tx: &Sender<Event>, token: &str) {
+    fn serve(
+        &self,
+        stream: TcpStream,
+        tx: &Sender<Event>,
+        token: &str,
+        clients: &Arc<AtomicUsize>,
+    ) {
+        let _guard = ClientGuard(Arc::clone(clients));
+        if stream
+            .set_write_timeout(Some(Duration::from_secs(10)))
+            .is_err()
+        {
+            return;
+        }
+        // Only the first line is time-limited: after authentication the
+        // window may stay idle for a long time.
+        if stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .is_err()
+        {
+            return;
+        }
         let Ok(read_half) = stream.try_clone() else {
             return;
         };
         let mut lines = BufReader::new(read_half).lines();
         let authorised = matches!(
             lines.next().and_then(Result::ok).and_then(|l| serde_json::from_str::<ToService>(&l).ok()),
-            Some(ToService::Auth { token: t }) if t == token
+            Some(ToService::Auth { token: t }) if tokens_equal(&t, token)
         );
         if !authorised {
             warn!("refused a settings-window connection with a wrong secret");
             return;
         }
+        let _ = stream.set_read_timeout(None);
         debug!("settings window connected");
         let alive = Arc::new(AtomicBool::new(true));
 
@@ -301,7 +472,9 @@ impl Server {
 /// A connection from the settings window to the service.
 pub struct Client {
     writer: Mutex<TcpStream>,
-    latest: Arc<Mutex<Option<Snapshot>>>,
+    /// `(version, snapshot)`: the version changes with every update, so the
+    /// window can avoid cloning an unchanged snapshot on every frame.
+    latest: Arc<Mutex<(u64, Option<Snapshot>)>>,
     connected: Arc<AtomicBool>,
 }
 
@@ -318,7 +491,7 @@ impl Client {
             .map_err(io::Error::other)?;
         writeln!(stream, "{auth}")?;
 
-        let latest = Arc::new(Mutex::new(None));
+        let latest = Arc::new(Mutex::new((0u64, None)));
         let connected = Arc::new(AtomicBool::new(true));
         let (reader, l, c) = (
             BufReader::new(stream.try_clone()?),
@@ -332,7 +505,8 @@ impl Client {
                     let Ok(line) = line else { break };
                     if let Ok(ToClient::Snapshot { snapshot }) = serde_json::from_str(&line) {
                         if let Ok(mut slot) = l.lock() {
-                            *slot = Some(snapshot);
+                            slot.0 = slot.0.saturating_add(1);
+                            slot.1 = Some(snapshot);
                         }
                         on_update();
                     }
@@ -354,7 +528,16 @@ impl Client {
 
     /// The most recent state received.
     pub fn snapshot(&self) -> Option<Snapshot> {
-        self.latest.lock().ok().and_then(|s| s.clone())
+        self.latest.lock().ok().and_then(|s| s.1.clone())
+    }
+
+    /// The state if it changed since `seen`, with its new version.
+    pub fn snapshot_since(&self, seen: u64) -> Option<(u64, Snapshot)> {
+        let latest = self.latest.lock().ok()?;
+        if latest.0 == seen {
+            return None;
+        }
+        latest.1.clone().map(|snapshot| (latest.0, snapshot))
     }
 
     /// Sends a command to the service.
@@ -398,5 +581,32 @@ mod tests {
     fn tokens_are_random() {
         assert_ne!(random_token(), random_token());
         assert_eq!(random_token().len(), 32);
+    }
+
+    #[test]
+    fn compares_tokens_without_short_circuiting() {
+        assert!(tokens_equal("abc", "abc"));
+        assert!(!tokens_equal("abc", "abd"));
+        assert!(!tokens_equal("abc", "ab"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn runtime_files_are_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("logirev-ipc-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        create_private_dir(&dir).unwrap();
+        assert_eq!(
+            std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        let file = dir.join("service.json");
+        write_private(&file, b"{}").unwrap();
+        assert_eq!(
+            std::fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

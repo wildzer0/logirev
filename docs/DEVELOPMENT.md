@@ -82,6 +82,11 @@ Both are thin wrappers around the library in `src/lib.rs`.
 | `build.rs`, `res/logirev.manifest` | Windows manifest (Common Controls 6, per-monitor DPI) embedded at link time |
 | `src/logging.rs` | size-capped rotating log file |
 | `src/pcap.rs` | size-capped Wireshark capture (USBPcap link type) |
+| `src/update.rs` | update check and installation from GitHub releases |
+| `src/http.rs` | minimal HTTPS downloads (WinHTTP / curl), 64 MiB cap |
+| `src/sha256.rs` | SHA-256 of downloaded updates |
+| `src/locale.rs` | English / Italian choice for the service messages |
+| `src/autostart.rs` | "Start with Windows" registry entry |
 | `tools/hidpp.lua` | Wireshark dissector |
 | `config/logirev.toml` | commented default configuration (embedded in the binary) |
 
@@ -211,11 +216,13 @@ their features are discovered at runtime. To support a new setting:
    bare `logirev-<tag>-windows-x64.exe` / `logirevctl-<tag>-windows-x64.exe`
    (downloaded by the automatic updater, `src/update.rs`) and
    `SHA256SUMS.txt` (the updater refuses files whose hash does not match) on
-   the Releases page. The updater only sees *non*-pre-releases. Tags containing `-` (e.g.
+   the Releases page. The checksums protect against a damaged download, not
+   against a compromised repository: signing the manifest with a release key
+   (and embedding its public key) is still to be done. The updater only sees *non*-pre-releases. Tags containing `-` (e.g.
    `v0.3.0-beta.1`) are published as pre-releases.
 
 The **CI** workflow (`.github/workflows/ci.yml`) runs formatting, lints and
-tests on Linux and Windows for every push to `main` and every pull request.
+tests on Linux and Windows for every push (all branches) and every pull request.
 
 ## Code conventions
 

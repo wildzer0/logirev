@@ -232,6 +232,10 @@ window can be built from source with `cargo build --release`).
    [docs/CONFIGURATION.md](docs/CONFIGURATION.md)) and applied as soon as
    the file is saved.
 
+   The daily update check uses `curl` (present on most distributions); if it
+   is missing the check is simply skipped, or turn it off with
+   `check_updates = false`.
+
 ---
 
 ## More documentation

@@ -3,7 +3,19 @@
 All notable changes are listed here. Versions follow
 [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
+## [1.4.0] — 2026-10-26
+
+### Added
+- **Radial menus** (Windows): a ring of up to eight custom actions that
+  opens under the mouse pointer when any configurable button of a mouse,
+  trackball or trackpad is pressed. Each item can run any action (program,
+  shortcut, macro, desktop...); the menu does not take the focus. It can be
+  used with a **click** (opens and stays open) or by **holding the button,
+  moving over a sector and releasing**; a quick click never chooses by
+  accident. New *Radial menus* page in the settings window.
+- `logirev.exe --radial-demo` shows a sample menu without a receiver.
+- New `desktop` action (`next` / `prev`) to change virtual desktop,
+  available in buttons, gestures and menu items.
 
 ### Fixed
 - Pointer speed: 2.0× was offered by the window but rejected by the firmware;
@@ -19,27 +31,23 @@ All notable changes are listed here. Versions follow
 - A HID reader that cannot start is reported instead of panicking; an
   unreadable backlight no longer stops the others; `logirevctl scan` reports
   a configuration file that does not load.
-
-## [1.4.0-rc.1] — 2026-10-26
-
-Release candidate for testing the radial menu (the Windows look and the
-holding gesture are not verified on hardware yet).
-
-### Added
-- **Radial menus** (Windows): a ring of up to eight custom actions that
-  opens under the mouse pointer when any configurable button of a mouse,
-  trackball or trackpad is pressed. Each item can run any action (program,
-  shortcut, macro, desktop...); the menu does not take the focus. It can be
-  used with a **click** (opens and stays open) or by **holding the button,
-  moving over a sector and releasing**; the quick click never chooses by
-  accident. New *Radial menus* page in the settings window.
-- `logirev.exe --radial-demo` shows a sample menu without a receiver.
-- New `desktop` action (`next` / `prev`) to change virtual desktop,
-  available in buttons, gestures and menu items.
+- The settings-window channel writes its discovery file in a private folder
+  (0700/0600), uses a random token from the operating system, refuses more
+  than eight connections and limits the time a client may take to
+  authenticate. The Linux instance lock uses a private folder and file too.
+- Update versions are compared as semver (`rc.10` is newer than `rc.9`) and
+  downloads are capped at 64 MiB.
+- Device setup uses a shorter timeout (a sleeping device no longer blocks
+  the event loop for seconds per message), the file is not reloaded twice
+  after saving, and the window clones the snapshot only when it changes.
 
 ### Changed
 - The button editor offers the *Radial menu* action only for pointing
   devices, and the ready-made actions include *Next/Previous desktop*.
+
+## [1.4.0-rc.1] — 2026-10-26
+
+Release candidate for testing the radial menu; superseded by 1.4.0.
 
 ## [1.3.1] — 2026-10-24
 

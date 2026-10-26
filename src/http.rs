@@ -7,8 +7,13 @@
 
 /// Program name sent to the server (GitHub requires one).
 const AGENT: &str = concat!("logirev/", env!("CARGO_PKG_VERSION"));
+/// Largest download accepted (a release executable is far smaller).
+const MAX_BYTES: usize = 64 * 1024 * 1024;
 
 /// Downloads `url` (HTTPS only, redirects followed) and returns the body.
+///
+/// At most 64 MiB are accepted, so a hostile or broken server cannot make
+/// the service allocate without limit.
 pub fn get(url: &str) -> Result<Vec<u8>, String> {
     imp::get(url)
 }
@@ -34,7 +39,7 @@ mod imp {
         WINHTTP_QUERY_STATUS_CODE,
     };
 
-    use super::{split_https, AGENT};
+    use super::{split_https, AGENT, MAX_BYTES};
 
     fn wide(s: &str) -> Vec<u16> {
         s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -125,6 +130,9 @@ mod imp {
                 if available == 0 {
                     break;
                 }
+                if body.len() + available as usize > MAX_BYTES {
+                    return Err("download too large".into());
+                }
                 let start = body.len();
                 body.resize(start + available as usize, 0);
                 let mut read = 0u32;
@@ -146,10 +154,11 @@ mod imp {
 
 #[cfg(not(windows))]
 mod imp {
-    use super::{split_https, AGENT};
+    use super::{split_https, AGENT, MAX_BYTES};
 
     pub fn get(url: &str) -> Result<Vec<u8>, String> {
         split_https(url)?;
+        let max = MAX_BYTES.to_string();
         let out = std::process::Command::new("curl")
             .args([
                 "--fail",
@@ -158,6 +167,8 @@ mod imp {
                 "--location",
                 "--max-time",
                 "120",
+                "--max-filesize",
+                max.as_str(),
                 "--user-agent",
                 AGENT,
                 url,

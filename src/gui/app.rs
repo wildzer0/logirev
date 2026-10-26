@@ -118,6 +118,8 @@ pub struct SettingsApp {
     client: Option<Client>,
     last_attempt: Option<Instant>,
     snapshot: Snapshot,
+    /// Version of `snapshot` received from the service.
+    snapshot_version: u64,
     config_path: PathBuf,
     raw: RawConfig,
     load_error: Option<String>,
@@ -179,6 +181,7 @@ impl SettingsApp {
             client: None,
             last_attempt: None,
             snapshot: Snapshot::default(),
+            snapshot_version: 0,
             config_path,
             raw,
             load_error,
@@ -472,8 +475,13 @@ impl SettingsApp {
             let repaint = ctx.clone();
             self.client = Client::connect(move || repaint.request_repaint()).ok();
         }
-        if let Some(snap) = self.client.as_ref().and_then(Client::snapshot) {
-            self.snapshot = snap;
+        if let Some((version, snapshot)) = self
+            .client
+            .as_ref()
+            .and_then(|c| c.snapshot_since(self.snapshot_version))
+        {
+            self.snapshot = snapshot;
+            self.snapshot_version = version;
         }
         if let Some(at) = self.dirty_at {
             if at.elapsed() >= SAVE_DELAY {

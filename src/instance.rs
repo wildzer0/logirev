@@ -68,6 +68,7 @@ mod imp {
 mod imp {
     use super::*;
     use std::os::fd::AsRawFd;
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
     use std::path::PathBuf;
 
     pub fn acquire(name: &str) -> io::Result<InstanceGuard> {
@@ -77,12 +78,31 @@ mod imp {
                 // SAFETY: getuid never fails.
                 std::env::temp_dir().join(format!("logirev-{}", unsafe { libc::getuid() }))
             });
-        std::fs::create_dir_all(&dir)?;
+        if let Ok(meta) = std::fs::symlink_metadata(&dir) {
+            if meta.file_type().is_symlink()
+                || !meta.is_dir()
+                || meta.uid() != unsafe { libc::getuid() }
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    format!("{} is not a private runtime directory", dir.display()),
+                ));
+            }
+        }
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&dir)?;
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
+        let path = dir.join(format!("{name}.lock"));
         let file = std::fs::OpenOptions::new()
             .create(true)
             .truncate(false)
             .write(true)
-            .open(dir.join(format!("{name}.lock")))?;
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(&path)?;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
         // SAFETY: valid fd owned by `file`.
         if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
             let err = io::Error::last_os_error();
