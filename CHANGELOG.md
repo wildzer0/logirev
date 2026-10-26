@@ -3,6 +3,18 @@
 All notable changes are listed here. Versions follow
 [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Changed
+- The settings window has a fixed size, so the layout no longer moves while
+  dragging the window borders.
+- The radial-menu preview uses a lighter anti-aliasing pass (the real
+  overlay is unchanged), making hovering in the Menus page smoother.
+
+### Fixed
+- The service-status indicator next to Search is now a painted dot instead
+  of a `●` character that some fonts render as a green square.
+
 ## [1.5.0] — 2026-10-26
 
 ### Added

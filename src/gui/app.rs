@@ -641,8 +641,7 @@ impl SettingsApp {
                     self.palette_focus = true;
                 }
                 if self.connected() {
-                    ui.label(RichText::new("●").color(GOOD).size(10.0))
-                        .on_hover_text(t.service_running);
+                    status_dot(ui, true, t.service_running);
                 } else {
                     if ui
                         .button(format!("{} {}", icon::POWER, t.service_start))
@@ -655,8 +654,7 @@ impl SettingsApp {
                         );
                         self.last_attempt = None;
                     }
-                    ui.label(RichText::new("●").color(BAD).size(10.0))
-                        .on_hover_text(t.service_stopped);
+                    status_dot(ui, false, t.service_stopped);
                 }
             });
         });
@@ -3593,7 +3591,7 @@ fn menu_editor(
     let texture = match previews.get(name) {
         Some((cached, texture)) if *cached == key => texture.clone(),
         _ => {
-            let frame = crate::radial::paint(menu.items.len(), hover, &metrics);
+            let frame = crate::radial::paint_preview(menu.items.len(), hover, &metrics);
             let image =
                 egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &frame.rgba);
             let texture = ui.ctx().load_texture(
@@ -3753,6 +3751,14 @@ fn shorten_text(text: &str, max: usize) -> String {
     let mut out: String = text.chars().take(max.saturating_sub(1)).collect();
     out.push('…');
     out
+}
+
+/// A small painted service-status dot (not a text glyph).
+fn status_dot(ui: &mut Ui, ok: bool, tooltip: &str) {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), Sense::hover());
+    ui.painter()
+        .circle_filled(rect.center(), 4.0, if ok { GOOD } else { BAD });
+    response.on_hover_text(tooltip);
 }
 
 /// A titled card.

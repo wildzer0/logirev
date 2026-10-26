@@ -58,7 +58,9 @@ pub fn run(opts: &ServiceOptions) -> ExitCode {
             .with_title(TITLE)
             .with_app_id("logirev")
             .with_inner_size([1040.0, 700.0])
-            .with_min_inner_size([780.0, 520.0])
+            .with_min_inner_size([1040.0, 700.0])
+            .with_max_inner_size([1040.0, 700.0])
+            .with_resizable(false)
             .with_icon(Arc::new(icon)),
         ..Default::default()
     };

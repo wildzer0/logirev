@@ -395,6 +395,15 @@ const SAMPLES: usize = 4;
 ///
 /// `hover` is the item under the pointer, highlighted in the accent colour.
 pub fn paint(count: usize, hover: Option<usize>, m: &Metrics) -> Frame {
+    paint_with_samples(count, hover, m, SAMPLES)
+}
+
+/// A faster version for the settings preview: half the anti-aliasing samples.
+pub fn paint_preview(count: usize, hover: Option<usize>, m: &Metrics) -> Frame {
+    paint_with_samples(count, hover, m, 2)
+}
+
+fn paint_with_samples(count: usize, hover: Option<usize>, m: &Metrics, samples: usize) -> Frame {
     let layout = Layout::new(count);
     let (w, h) = m.frame_size();
     let (cx, cy) = m.center();
@@ -404,16 +413,16 @@ pub fn paint(count: usize, hover: Option<usize>, m: &Metrics) -> Frame {
     let panel = m.radius + PANEL_DIP * m.scale;
     let (close_y, arm) = (cy - 4.0 * m.scale, CLOSE_ARM_DIP * m.scale);
     let close = CLOSE_THICKNESS_DIP * m.scale;
-    let samples = SAMPLES * SAMPLES;
+    let total_samples = samples * samples;
 
     for y in 0..frame.height {
         for x in 0..frame.width {
             let mut sum = [0.0f32; 3];
             let mut alpha = 0.0f32;
-            for sy in 0..SAMPLES {
-                for sx in 0..SAMPLES {
-                    let px = x as f32 + (sx as f32 + 0.5) / SAMPLES as f32;
-                    let py = y as f32 + (sy as f32 + 0.5) / SAMPLES as f32;
+            for sy in 0..samples {
+                for sx in 0..samples {
+                    let px = x as f32 + (sx as f32 + 0.5) / samples as f32;
+                    let py = y as f32 + (sy as f32 + 0.5) / samples as f32;
                     let (dx, dy) = (px - cx, py - cy);
                     let d = (dx * dx + dy * dy).sqrt();
                     let (color, a) = if d > panel {
@@ -469,7 +478,9 @@ pub fn paint(count: usize, hover: Option<usize>, m: &Metrics) -> Frame {
             }
             if alpha > 0.0 {
                 let i = (y * frame.width + x) * 4;
-                let a = (alpha / samples as f32 * 255.0).round().clamp(0.0, 255.0) as u8;
+                let a = (alpha / total_samples as f32 * 255.0)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
                 frame.rgba[i] = (sum[0] / alpha).round().clamp(0.0, 255.0) as u8;
                 frame.rgba[i + 1] = (sum[1] / alpha).round().clamp(0.0, 255.0) as u8;
                 frame.rgba[i + 2] = (sum[2] / alpha).round().clamp(0.0, 255.0) as u8;
