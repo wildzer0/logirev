@@ -105,6 +105,8 @@ pcap_max_size = 10485760      # 10 MiB
 #      { action = "brightness", change = 10 }          screen brighter (-10 = darker)
 #      { action = "brightness", set = 50 }             screen at 50 %
 #      { action = "backlight", change = "up" }         keyboard light: up/down/toggle
+#      { action = "desktop", direction = "next" }      next/previous virtual desktop
+#      { action = "radial", menu = "work" }            a radial menu (see below)
 #      { action = "macro", name = "signature" }        a macro from [macros] below
 #      { action = "macro", name = "spam", repeat = 100 }  ...repeated while held
 #      { action = "sequence", steps = [ { keys = "Ctrl+A" }, { delay = 100 }, { text = "Hi" } ] }
@@ -143,6 +145,28 @@ pcap_max_size = 10485760      # 10 MiB
 #  Example (remove the "#" to use it):
 # [macros.signature]
 # steps = [ { text = "Best regards," }, { keys = "Enter" }, { text = "Your Name" } ]
+
+# -----------------------------------------------------------------------------
+#  Radial menus (Windows): a ring of actions under the pointer.
+#  Assign one to ANY button of a mouse/trackball/trackpad with the "radial"
+#  action:  precision = { action = "radial", menu = "work" }
+#  Click opens and stays open; or hold the button, move over a sector and
+#  release to run it at once. Click outside or on the X to close.
+#  A menu has at most 8 items, clockwise from the top; every item can run any
+#  action (shortcut, program, macro, desktop, ...). Remove the "#" to try it.
+# -----------------------------------------------------------------------------
+# [menus.work]
+# title = "Work"                     # optional, shown in the middle
+# items = [
+#   { label = "VS Code", icon = "code", action = { action = "command", command = "code.exe" } },
+#   { label = "Desktop →", icon = "desktop", action = { action = "desktop", direction = "next" } },
+#   { label = "Copy", action = { action = "keys", keys = "Ctrl+C" } },
+# ]
+# Icons (optional): app, browser, calculator, camera, check, close, code, copy,
+# crosshair, cut, desktop, file, folder, grid, info, keyboard, left, light,
+# lock, magic, mute, next, paste, play, power, prev, refresh, right, save,
+# settings, stack, sun, terminal, undo, volume, warning, windows.
+# Without hardware:  logirev.exe --radial-demo
 
 # --- Logitech MX Ergo S (and MX Ergo) trackball ------------------------------
 # The MX Ergo S changes speed through its DPI (sensor resolution). Remove the

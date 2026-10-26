@@ -18,7 +18,7 @@
 //! structures (mirroring the file), then `validate` turns them into the
 //! types the daemon uses, with readable error messages.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -27,6 +27,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::hidpp::features::{parse_control, DeviceKind, SmartShift, DISABLE_KEY_NAMES};
 use crate::input::keys::{parse_chord, Key, MouseButton};
+use crate::radial;
 
 /// The commented default configuration, written by `logirevctl init`.
 pub const TEMPLATE: &str = include_str!("../config/logirev.toml");
@@ -62,6 +63,34 @@ pub struct RawConfig {
     /// `[macros.<name>]` blocks, usable from any button.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub macros: BTreeMap<String, RawMacro>,
+    /// `[menus.<name>]` blocks: radial menus for pointing devices.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub menus: BTreeMap<String, RawMenu>,
+}
+
+/// `[menus.<name>]`: a radial menu, opened by a button of a pointing device.
+#[derive(Debug, Default, Deserialize, Clone, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawMenu {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Short title shown in the middle of the menu (optional).
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// The sectors, clockwise from the top (at most eight).
+    pub items: Vec<RawMenuItem>,
+}
+
+/// One sector of a radial menu.
+#[derive(Debug, Deserialize, Clone, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawMenuItem {
+    /// Text shown in the sector (a few characters fit).
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Icon name (see `logirevctl` documentation); optional.
+    pub icon: Option<String>,
+    /// What selecting the sector does.
+    pub action: RawAction,
 }
 
 /// `[macros.<name>]`: a named list of steps.
@@ -380,6 +409,16 @@ pub enum RawAction {
         /// Movement needed, in device counts (default 50).
         threshold: Option<u16>,
     },
+    /// Open a radial menu at the pointer (any button of a pointing device).
+    Radial {
+        /// Name of a `[menus.<name>]` block.
+        menu: String,
+    },
+    /// Switch to another virtual desktop.
+    Desktop {
+        /// Which way.
+        direction: DesktopDirection,
+    },
     /// Do nothing.
     Disable,
     /// Normal behaviour (the button is not remapped).
@@ -402,6 +441,16 @@ pub enum ScrollDirection {
     Left,
     /// Scroll right.
     Right,
+}
+
+/// Direction of a `desktop` action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DesktopDirection {
+    /// The desktop to the right (next).
+    Next,
+    /// The desktop to the left (previous).
+    Prev,
 }
 
 /// `host = 2` or `host = "next"`.
@@ -467,6 +516,28 @@ pub struct Config {
     pub profiles: Vec<Profile>,
     /// Validated `[macros]`, by name.
     pub macros: BTreeMap<String, Vec<Step>>,
+    /// Validated `[menus]`, by name.
+    pub menus: BTreeMap<String, Menu>,
+}
+
+/// A radial menu, validated.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Menu {
+    /// Title shown in the middle, if any.
+    pub title: Option<String>,
+    /// The sectors, clockwise from the top.
+    pub items: Vec<MenuItem>,
+}
+
+/// One sector of a radial menu, validated.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MenuItem {
+    /// Text shown in the sector.
+    pub label: String,
+    /// Icon name, if any.
+    pub icon: Option<String>,
+    /// What selecting it does.
+    pub action: Action,
 }
 
 /// One validated `[[profile]]`.
@@ -551,6 +622,13 @@ pub enum Action {
     Backlight(BacklightChange),
     /// Hold the button and move the pointer: one action per direction.
     Gesture(Box<Gesture>),
+    /// Open a radial menu at the pointer (any button of a pointing device).
+    Radial {
+        /// Name of a `[menus.<name>]` block.
+        menu: String,
+    },
+    /// Switch to another virtual desktop.
+    Desktop(DesktopDirection),
     /// Swallow the button: it does nothing at all.
     Disable,
 }
@@ -679,10 +757,17 @@ impl Config {
             let steps = validate_steps(m.steps).map_err(|e| format!("macro \"{name}\": {e}"))?;
             macros.insert(name, steps);
         }
+        let menu_names: BTreeSet<String> = raw.menus.keys().cloned().collect();
+        let mut menus = BTreeMap::new();
+        for (name, m) in raw.menus {
+            let menu =
+                validate_menu(&name, m, &macros).map_err(|e| format!("menu \"{name}\": {e}"))?;
+            menus.insert(name, menu);
+        }
         let profiles = raw
             .profiles
             .into_iter()
-            .map(|p| Profile::validate(p, &macros))
+            .map(|p| Profile::validate(p, &macros, &menu_names))
             .collect::<Result<_, _>>()?;
         Ok(Self {
             base_dir: base_dir.to_path_buf(),
@@ -690,6 +775,7 @@ impl Config {
             logging: raw.logging,
             profiles,
             macros,
+            menus,
         })
     }
 
@@ -776,7 +862,11 @@ impl Profile {
         self.apps.iter().any(|a| a.programs.contains(&key))
     }
 
-    fn validate(raw: RawProfile, macros: &BTreeMap<String, Vec<Step>>) -> Result<Self, String> {
+    fn validate(
+        raw: RawProfile,
+        macros: &BTreeMap<String, Vec<Step>>,
+        menus: &BTreeSet<String>,
+    ) -> Result<Self, String> {
         let name = raw.name.clone();
         let ctx = |msg: String| format!("profile \"{name}\": {msg}");
 
@@ -784,7 +874,7 @@ impl Profile {
         for (key, action) in raw.buttons {
             let cid =
                 parse_control(&key).ok_or_else(|| ctx(format!("unknown button \"{key}\"")))?;
-            if let Some(a) = validate_action(action, false, macros)
+            if let Some(a) = validate_action(action, false, false, macros, menus)
                 .map_err(|e| ctx(format!("button \"{key}\": {e}")))?
             {
                 buttons.insert(cid, a);
@@ -802,7 +892,7 @@ impl Profile {
             for (key, action) in app.buttons {
                 let cid =
                     parse_control(&key).ok_or_else(|| ctx(format!("unknown button \"{key}\"")))?;
-                let a = validate_action(action, false, macros)
+                let a = validate_action(action, false, false, macros, menus)
                     .map_err(|e| ctx(format!("app {:?}, button \"{key}\": {e}", app.programs)))?;
                 map.insert(cid, a);
             }
@@ -900,12 +990,83 @@ pub fn program_key(name: &str) -> String {
     file.strip_suffix(".exe").unwrap_or(file).to_owned()
 }
 
+/// Checks one `[menus.<name>]` block and turns it into a [`Menu`].
+fn validate_menu(
+    name: &str,
+    raw: RawMenu,
+    macros: &BTreeMap<String, Vec<Step>>,
+) -> Result<Menu, String> {
+    if name.trim().is_empty() {
+        return Err("the menu name cannot be empty".into());
+    }
+    if raw.items.len() > radial::MAX_ITEMS {
+        return Err(format!(
+            "a menu has at most {} items (found {})",
+            radial::MAX_ITEMS,
+            raw.items.len()
+        ));
+    }
+    let title = raw
+        .title
+        .map(|t| t.trim().to_owned())
+        .filter(|t| !t.is_empty());
+    if let Some(title) = &title {
+        if title.chars().count() > radial::MAX_TITLE_CHARS {
+            return Err(format!(
+                "the title is longer than {} characters",
+                radial::MAX_TITLE_CHARS
+            ));
+        }
+    }
+    let mut items = Vec::with_capacity(raw.items.len());
+    for (i, item) in raw.items.into_iter().enumerate() {
+        let n = i + 1;
+        let label = item.label.trim().to_owned();
+        if label.is_empty() {
+            return Err(format!("item {n}: the label cannot be empty"));
+        }
+        if label.chars().count() > radial::MAX_LABEL_CHARS {
+            return Err(format!(
+                "item {n}: the label is longer than {} characters",
+                radial::MAX_LABEL_CHARS
+            ));
+        }
+        let icon = item
+            .icon
+            .map(|i| i.trim().to_owned())
+            .filter(|i| !i.is_empty());
+        if let Some(icon) = &icon {
+            if radial::icon_glyph(icon).is_none() {
+                let known: Vec<&str> = radial::ICONS.iter().map(|(n, _)| *n).collect();
+                return Err(format!(
+                    "item {n}: unknown icon \"{icon}\" (use {})",
+                    known.join(", ")
+                ));
+            }
+        }
+        // A menu item is an action, not a button: no gestures (there is no
+        // button to hold) and no other radial menu (no recursion).
+        let action = validate_action(item.action, false, true, macros, &BTreeSet::new())
+            .map_err(|e| format!("item {n}: {e}"))?
+            .ok_or_else(|| format!("item {n}: an action is required"))?;
+        items.push(MenuItem {
+            label,
+            icon,
+            action,
+        });
+    }
+    Ok(Menu { title, items })
+}
+
 /// Turns one action from the file into its validated form. `Ok(None)` means
-/// "default behaviour". `nested` is true inside a gesture.
+/// "default behaviour". `nested` is true inside a gesture, `in_menu` inside
+/// a radial-menu item (where gestures and menus are not allowed).
 fn validate_action(
     raw: RawAction,
     nested: bool,
+    in_menu: bool,
     macros: &BTreeMap<String, Vec<Step>>,
+    menus: &BTreeSet<String>,
 ) -> Result<Option<Action>, String> {
     Ok(Some(match raw {
         RawAction::Keys { keys } => Action::Keys(parse_chord(&keys)?),
@@ -988,12 +1149,15 @@ fn validate_action(
             click,
             threshold,
         } => {
+            if in_menu {
+                return Err("a menu item cannot be a gesture".into());
+            }
             if nested {
                 return Err("a gesture cannot contain another gesture".into());
             }
             let sub = |a: Option<Box<RawAction>>| -> Result<Option<Action>, String> {
                 match a {
-                    Some(a) => validate_action(*a, true, macros),
+                    Some(a) => validate_action(*a, true, false, macros, menus),
                     None => Ok(None),
                 }
             };
@@ -1006,6 +1170,25 @@ fn validate_action(
                 threshold: threshold.unwrap_or(DEFAULT_GESTURE_THRESHOLD).max(1),
             }))
         }
+        RawAction::Radial { menu } => {
+            if in_menu {
+                return Err("a menu item cannot open another radial menu".into());
+            }
+            let menu = menu.trim().to_owned();
+            if !menus.contains(&menu) {
+                let known: Vec<&str> = menus.iter().map(String::as_str).collect();
+                return Err(if known.is_empty() {
+                    format!("no radial menu named \"{menu}\" (define it in a [menus.{menu}] block)")
+                } else {
+                    format!(
+                        "no radial menu named \"{menu}\" (known: {})",
+                        known.join(", ")
+                    )
+                });
+            }
+            Action::Radial { menu }
+        }
+        RawAction::Desktop { direction } => Action::Desktop(direction),
         RawAction::Disable => Action::Disable,
         RawAction::Default => return Ok(None),
     }))
@@ -1449,5 +1632,125 @@ mod tests {
         assert_eq!(program_key("Chrome.EXE"), "chrome");
         assert_eq!(program_key(r"C:\Apps\Code.exe"), "code");
         assert_eq!(program_key("firefox"), "firefox");
+    }
+
+    const MENU: &str = r#"
+        [menus.work]
+        title = "Work"
+        items = [
+            { label = "Code", icon = "code", action = { action = "command", command = "code.exe" } },
+            { label = "Next desktop", icon = "desktop", action = { action = "desktop", direction = "next" } },
+        ]
+
+        [[profile]]
+        name = "p"
+        match = { kind = "trackball" }
+        [profile.buttons]
+        back = { action = "radial", menu = "work" }
+    "#;
+
+    #[test]
+    fn parses_radial_menus_and_desktop() {
+        let cfg = parse(MENU).unwrap();
+        let menu = &cfg.menus["work"];
+        assert_eq!(menu.title.as_deref(), Some("Work"));
+        assert_eq!(menu.items.len(), 2);
+        assert_eq!(menu.items[0].label, "Code");
+        assert_eq!(menu.items[0].icon.as_deref(), Some("code"));
+        assert!(matches!(
+            menu.items[0].action,
+            Action::Command { ref program, .. } if program == "code.exe"
+        ));
+        assert_eq!(
+            menu.items[1].action,
+            Action::Desktop(DesktopDirection::Next)
+        );
+        assert_eq!(
+            cfg.profiles[0].buttons[&0x53],
+            Action::Radial {
+                menu: "work".into()
+            }
+        );
+    }
+
+    #[test]
+    fn radial_can_open_from_any_button() {
+        // Any button can carry the action; only the device kind is checked
+        // when it is pressed (the daemon needs a pointer).
+        let cfg = parse(
+            r#"
+            [menus.m]
+            items = [ { label = "x", action = { action = "disable" } } ]
+            [[profile]]
+            name = "p"
+            [profile.buttons]
+            middle = { action = "radial", menu = "m" }
+            tilt_left = { action = "radial", menu = "m" }
+            "0x00FD" = { action = "radial", menu = "m" }
+            "#,
+        )
+        .unwrap();
+        for cid in [0x52, 0x5B, 0xFD] {
+            assert_eq!(
+                cfg.profiles[0].buttons[&cid],
+                Action::Radial { menu: "m".into() }
+            );
+        }
+    }
+
+    #[test]
+    fn menus_survive_a_write_and_read_cycle() {
+        let raw = RawConfig::parse(MENU).unwrap();
+        let text = toml::to_string_pretty(&raw).unwrap();
+        let again = Config::parse(&text, Path::new(".")).unwrap_or_else(|e| panic!("{e}\n{text}"));
+        assert_eq!(
+            again.menus,
+            Config::parse(MENU, Path::new(".")).unwrap().menus
+        );
+    }
+
+    #[test]
+    fn rejects_bad_menus() {
+        let bad = |t: &str| parse(t).is_err();
+        // A menu that does not exist.
+        assert!(bad(r#"[[profile]]
+               name = "p"
+               buttons.back = { action = "radial", menu = "nope" }"#));
+        // Unknown icon, empty label, too long, recursive menu, gesture.
+        assert!(bad(r#"[menus.m]
+               items = [ { label = "x", icon = "nope", action = { action = "disable" } } ]"#));
+        assert!(bad(r#"[menus.m]
+               items = [ { label = "  ", action = { action = "disable" } } ]"#));
+        assert!(bad(&format!(
+            "[menus.m]\nitems = [ {{ label = \"{}\", action = {{ action = \"disable\" }} }} ]",
+            "x".repeat(radial::MAX_LABEL_CHARS + 1)
+        )));
+        assert!(bad(&format!(
+            "[menus.m]\ntitle = \"{}\"",
+            "x".repeat(radial::MAX_TITLE_CHARS + 1)
+        )));
+        assert!(bad(r#"[menus.m]
+               items = [ { label = "x", action = { action = "radial", menu = "m" } } ]"#));
+        assert!(bad(r#"[menus.m]
+               items = [ { label = "x", action = { action = "gesture", up = { action = "disable" } } } ]"#));
+        // Nine items are too many for the ring.
+        let mut many = String::from("[menus.m]\nitems = [\n");
+        for i in 0..=radial::MAX_ITEMS {
+            many.push_str(&format!(
+                "  {{ label = \"{i}\", action = {{ action = \"disable\" }} }},\n"
+            ));
+        }
+        many.push_str("]\n");
+        assert!(bad(&many));
+        // Invalid desktop direction is a parse error.
+        assert!(bad(r#"[[profile]]
+               name = "p"
+               buttons.back = { action = "desktop", direction = "sideways" }"#));
+    }
+
+    #[test]
+    fn empty_menu_is_allowed_while_editing() {
+        let cfg = parse("[menus.m]\ntitle = \"Empty\"").unwrap();
+        assert!(cfg.menus["m"].items.is_empty());
     }
 }

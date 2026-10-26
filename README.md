@@ -15,6 +15,10 @@ cable or Bluetooth. It was built and tested with an **MX Ergo S** trackball.
   record), mouse clicks, scrolling, opening programs, macros, gestures (hold
   a button and move), screen brightness, keyboard backlight, switching to
   another computer.
+- **Radial menus** (Windows) — a ring of your own actions that opens under
+  the pointer, assigned to any button of a mouse, trackball or trackpad:
+  programs, shortcuts, desktops, macros, anything. Click a sector, or hold
+  the button, move and release.
 - **Different buttons in different programs** — e.g. the side buttons do
   *undo / redo* only in Photoshop.
 - **Speed and wheel** — DPI, precision mode, SmartShift, scroll direction.
@@ -88,6 +92,8 @@ double-clicking `logirev.exe` again).
   - **Computers**: send the device to another computer (Easy-Switch).
 - **Macros** — lists of steps (shortcuts, text, clicks, pauses) that a
   button can run.
+- **Radial menus** — rings of up to eight actions that open under the
+  pointer; assign one to a button of a mouse or trackball.
 - **Settings** — language, light or dark look, *Start with Windows*,
   battery warning, **updates**.
 
@@ -185,6 +191,10 @@ for Wireshark (quit logirev first).
 changes the DPI, precision mode or computer; the battery level on the tray
 icon and a notification when charging is complete; wheel speed and smooth
 scrolling for every mouse; export and import of all your settings.
+
+**Radial menus** (*Radial menus*): up to eight custom actions in a ring that
+opens under the pointer, assigned to a button of a mouse or trackball. To
+look at the menu without a receiver, run `logirev.exe --radial-demo`.
 
 **Developer mode** (*Settings → Developer mode*) adds a *Technical* tab to
 each device: serial number, firmware components, every feature (including

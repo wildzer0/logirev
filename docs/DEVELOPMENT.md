@@ -70,13 +70,15 @@ Both are thin wrappers around the library in `src/lib.rs`.
 | `src/instance.rs` | single-instance lock |
 | `src/service.rs` | start at log-in (systemd user unit) |
 | `src/status.rs` | snapshots and notices the daemon sends to the interface |
+| `src/radial.rs` | radial-menu geometry, hit-test and painting (platform independent, tested) |
+| `src/icons.rs` | Phosphor icon glyphs and the embedded font, shared by egui and GDI |
 | `src/foreground.rs` | foreground-program watcher (WinEvent hook) for per-program buttons |
 | `src/brightness.rs` | screen brightness: DDC/CI (dxva2), WMI fallback, Linux backlight |
 | `src/ipc.rs` | local channel service ↔ settings window (127.0.0.1 + secret, JSON lines) |
 | `src/icon.rs` | the application icon drawn in code, `.ico` encoder (used by `build.rs`) |
 | `src/gui/` | settings window (egui/eframe, feature `gui`): `app.rs` pages, `form.rs` action editor, `style.rs` theme and icons, `i18n.rs` texts |
 | `src/ui/view.rs` | content of the tray menu and device window (portable, tested) |
-| `src/ui/windows/` | Win32 tray icon, menu, device window, autostart, device notifications |
+| `src/ui/windows/` | Win32 tray icon, menu, device window, on-screen messages, radial menu, autostart, device notifications |
 | `build.rs`, `res/logirev.manifest` | Windows manifest (Common Controls 6, per-monitor DPI) embedded at link time |
 | `src/logging.rs` | size-capped rotating log file |
 | `src/pcap.rs` | size-capped Wireshark capture (USBPcap link type) |
@@ -117,6 +119,15 @@ held across nested message loops (menus, message boxes).
   the pointer; `Gesture::pick` chooses the action on release.
 - Battery reports (function 0 of `0x1004` / `0x1000`) update the session;
   `Link::check_battery` warns once per discharge (hysteresis of 5 points).
+- A `radial` action asks the daemon to open a menu: the request travels as
+  `UiUpdate::Radial` (with the labels and icons only). When the button is
+  released, `UiUpdate::RadialRelease` lets the window run the sector under
+  the pointer (hold, move, release) or keep the menu open for a click; the
+  choice comes back as `Event::RadialSelect` and the daemon performs it with
+  the same device context. Any diverted control can open the menu; only the
+  device kind matters (pointing devices). Actions stay in the service; the
+  window never talks to devices. The request expires after 20 s and is
+  ignored when no tray window is attached.
 
 The protocol itself is described in plain language in
 [PROTOCOL.md](PROTOCOL.md).
@@ -143,11 +154,31 @@ LOGIREV_DEMO=1 LOGIREV_PAGE=editor \
 ```
 
 `LOGIREV_PAGE` can be `devices`, `device`, `pointer`, `computers`,
-`editor`, `macros`, `settings`, `about`. The screenshots in `docs/images`
-are made this way.
+`editor`, `menus`, `macros`, `settings`, `about`. The screenshots in
+`docs/images` are made this way.
 
 New texts go into the `texts!` table of `src/gui/i18n.rs` (English and
 Italian side by side; a missing translation does not compile).
+
+### The radial menu
+
+`src/radial.rs` owns the layout and the painting (ring, hover, shadow,
+masks) and is unit-tested on every platform; `src/ui/windows/radial.rs`
+creates the layered window once and shows it under the pointer with
+`UpdateLayeredWindow`. The window uses `WS_EX_NOACTIVATE` + `SetCapture`, so
+it never takes the focus and still receives the click; labels and icons are
+drawn with GDI into small masks and blended by `radial::composite_mask`.
+To look at it without hardware:
+
+```bash
+logirev.exe --radial-demo
+```
+
+The daemon side is small: `Ctx::radial` collects a request during a pass,
+`Daemon::open_radial` publishes it and `Daemon::radial_select` runs the
+chosen action. Menu definitions live in `[menus.<name>]` and are validated
+like macros; `radial` is refused inside menu items and only applies to
+pointing devices (`DeviceKind::is_pointing`).
 
 ## Adding a setting or a feature
 

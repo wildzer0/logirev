@@ -9,7 +9,7 @@ use eframe::egui::{self, ComboBox, CornerRadius, RichText, Stroke, Ui};
 
 use super::i18n::{fill, T};
 use super::style::{icon, palette, ACCENT};
-use crate::config::{BacklightChange, RawAction, RawHost, ScrollDirection};
+use crate::config::{BacklightChange, DesktopDirection, RawAction, RawHost, ScrollDirection};
 use crate::input::keys::{MouseButton, KEYS};
 
 /// The kinds of action offered in the form.
@@ -27,6 +27,10 @@ pub enum Kind {
     Brightness,
     Backlight,
     Macro,
+    /// Open a radial menu (pointing devices only).
+    Radial,
+    /// Switch virtual desktop.
+    Desktop,
     Gesture,
     /// An action written by hand that the form does not edit (kept as is).
     Custom,
@@ -47,6 +51,8 @@ impl Kind {
             Kind::Brightness => icon::SUN,
             Kind::Backlight => icon::LIGHTBULB,
             Kind::Macro => icon::STACK,
+            Kind::Radial => icon::HAND_POINTING,
+            Kind::Desktop => icon::DESKTOP,
             Kind::Gesture => icon::HAND_SWIPE_RIGHT,
             Kind::Custom => icon::FILE_TEXT,
         }
@@ -66,6 +72,8 @@ impl Kind {
             Kind::Brightness => t.act_brightness,
             Kind::Backlight => t.act_backlight,
             Kind::Macro => t.act_macro,
+            Kind::Radial => t.act_radial,
+            Kind::Desktop => t.act_desktop,
             Kind::Gesture => t.act_gesture,
             Kind::Custom => t.act_custom,
         }
@@ -79,6 +87,13 @@ pub struct FormContext<'a> {
     /// The button can follow movement (gestures).
     pub gestures: bool,
     pub macros: Vec<String>,
+    /// The device points (mouse, trackball, trackpad): the radial menu can
+    /// be assigned to it.
+    pub pointing: bool,
+    /// Radial menus that can be opened.
+    pub menus: Vec<String>,
+    /// Editing an item of a radial menu: no gestures and no nested menus.
+    pub menu_item: bool,
     pub dark: bool,
 }
 
@@ -105,6 +120,10 @@ pub struct ActionForm {
     macro_name: String,
     repeat: bool,
     repeat_ms: u32,
+    /// Menu opened by `Kind::Radial`.
+    menu: String,
+    /// Direction of `Kind::Desktop`.
+    desktop: DesktopDirection,
     /// Gesture directions: up, down, left, right, press.
     gesture: Vec<ActionForm>,
     threshold: u16,
@@ -138,6 +157,8 @@ impl Default for ActionForm {
             macro_name: String::new(),
             repeat: false,
             repeat_ms: 150,
+            menu: String::new(),
+            desktop: DesktopDirection::Next,
             gesture: Vec::new(),
             threshold: 50,
             custom: None,
@@ -223,6 +244,14 @@ impl ActionForm {
                     .collect();
                 f.threshold = threshold.unwrap_or(50);
             }
+            RawAction::Radial { menu } => {
+                f.kind = Kind::Radial;
+                f.menu = menu.clone();
+            }
+            RawAction::Desktop { direction } => {
+                f.kind = Kind::Desktop;
+                f.desktop = *direction;
+            }
             other => {
                 f.kind = Kind::Custom;
                 f.custom = Some(other.clone());
@@ -287,6 +316,13 @@ impl ActionForm {
                 name: self.macro_name.clone(),
                 repeat: self.repeat.then_some(self.repeat_ms.max(30)),
             },
+            Kind::Radial if self.menu.trim().is_empty() => return None,
+            Kind::Radial => RawAction::Radial {
+                menu: self.menu.trim().to_owned(),
+            },
+            Kind::Desktop => RawAction::Desktop {
+                direction: self.desktop,
+            },
             Kind::Gesture => {
                 let sub = |i: usize| {
                     self.gesture
@@ -343,6 +379,11 @@ impl ActionForm {
                 }
             }
             Kind::Macro => format!("{} \"{}\"", t.act_macro, self.macro_name),
+            Kind::Radial => format!("{} \"{}\"", t.act_radial, self.menu),
+            Kind::Desktop => match self.desktop {
+                DesktopDirection::Next => t.desktop_next.to_owned(),
+                DesktopDirection::Prev => t.desktop_prev.to_owned(),
+            },
             k => k.label(t).to_owned(),
         }
     }
@@ -373,7 +414,11 @@ impl ActionForm {
             kinds.push(Kind::Backlight);
         }
         kinds.push(Kind::Macro);
-        if !nested {
+        if fc.pointing && !fc.menus.is_empty() && !fc.menu_item {
+            kinds.push(Kind::Radial);
+        }
+        kinds.push(Kind::Desktop);
+        if !nested && !fc.menu_item {
             kinds.push(Kind::Gesture);
         }
         if self.kind == Kind::Custom {
@@ -642,6 +687,34 @@ impl ActionForm {
                 }
             }
             Kind::Gesture => self.gesture_ui(ui, fc, id),
+            Kind::Radial => {
+                if !fc.pointing {
+                    ui.colored_label(
+                        super::style::WARN,
+                        format!("{} {}", icon::WARNING, t.radial_pointing_only),
+                    );
+                }
+                if fc.menus.is_empty() {
+                    ui.label(RichText::new(t.no_menus).color(palette(fc.dark).muted));
+                } else {
+                    if !fc.menus.contains(&self.menu) {
+                        self.menu = fc.menus[0].clone();
+                    }
+                    ComboBox::from_id_salt(format!("{id}-menu"))
+                        .selected_text(&self.menu)
+                        .show_ui(ui, |ui| {
+                            for m in &fc.menus {
+                                ui.selectable_value(&mut self.menu, m.clone(), m);
+                            }
+                        });
+                }
+            }
+            Kind::Desktop => {
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut self.desktop, DesktopDirection::Next, t.desktop_next);
+                    ui.selectable_value(&mut self.desktop, DesktopDirection::Prev, t.desktop_prev);
+                });
+            }
             Kind::Custom => {
                 ui.label(RichText::new(t.custom_hint).color(palette(fc.dark).muted));
             }
@@ -785,8 +858,12 @@ fn presets(fc: &FormContext, nested: bool) -> Vec<(&'static str, Vec<Preset>)> {
         })
     };
 
-    let mut mouse = vec![
-        p(icon::ARROW_U_UP_LEFT, t.act_default, None),
+    let mut mouse = Vec::new();
+    if !fc.menu_item {
+        // A menu item always needs an action: "default" does not apply.
+        mouse.push(p(icon::ARROW_U_UP_LEFT, t.act_default, None));
+    }
+    mouse.extend([
         p(icon::PROHIBIT, t.act_disable, Some(RawAction::Disable)),
         p(icon::ARROW_LEFT, t.p_back, click(MouseButton::Back)),
         p(icon::ARROW_RIGHT, t.p_forward, click(MouseButton::Forward)),
@@ -805,7 +882,7 @@ fn presets(fc: &FormContext, nested: bool) -> Vec<(&'static str, Vec<Preset>)> {
             t.p_scroll_right,
             scroll(ScrollDirection::Right),
         ),
-    ];
+    ]);
     if !nested && !fc.dpi_values.is_empty() {
         // The supported value closest to 400 DPI: slow enough for precise
         // work, still usable.
@@ -839,6 +916,20 @@ fn presets(fc: &FormContext, nested: bool) -> Vec<(&'static str, Vec<Preset>)> {
             vec![
                 p(icon::SQUARES_FOUR, t.p_task_view, keys("Super+Tab")),
                 p(icon::DESKTOP, t.p_desktop, keys("Super+D")),
+                p(
+                    icon::CARET_RIGHT,
+                    t.p_desktop_next,
+                    Some(RawAction::Desktop {
+                        direction: DesktopDirection::Next,
+                    }),
+                ),
+                p(
+                    icon::CARET_LEFT,
+                    t.p_desktop_prev,
+                    Some(RawAction::Desktop {
+                        direction: DesktopDirection::Prev,
+                    }),
+                ),
                 p(icon::APP_WINDOW, t.p_switch_app, keys("Alt+Tab")),
                 p(icon::LOCK, t.p_lock, keys("Super+L")),
                 p(icon::CAMERA, t.p_screenshot, keys("Super+Shift+S")),
@@ -1113,6 +1204,24 @@ mod tests {
         round_trip(r#"{ action = "brightness", set = 70 }"#);
         round_trip(r#"{ action = "backlight", change = "up" }"#);
         round_trip(r#"{ action = "macro", name = "m", repeat = 200 }"#);
+        round_trip(r#"{ action = "desktop", direction = "next" }"#);
+        round_trip(r#"{ action = "desktop", direction = "prev" }"#);
+    }
+
+    #[test]
+    fn radial_forms_keep_the_menu() {
+        let cfg = RawConfig::parse(
+            "[menus.work]\nitems = [ { label = \"x\", action = { action = \"desktop\", direction = \"next\" } } ]\n[[profile]]\nname = \"p\"\nbuttons.back = { action = \"radial\", menu = \"work\" }",
+        )
+        .unwrap();
+        let raw = &cfg.profiles[0].buttons["back"];
+        let form = ActionForm::from_raw(Some(raw));
+        assert_eq!(form.kind, Kind::Radial);
+        assert_eq!(form.menu, "work");
+        assert_eq!(
+            toml::to_string(&form.to_raw().unwrap()).unwrap(),
+            toml::to_string(raw).unwrap()
+        );
     }
 
     #[test]
@@ -1136,6 +1245,9 @@ mod tests {
                 dpi_values: &[200, 400, 800, 1600],
                 gestures: true,
                 macros: Vec::new(),
+                pointing: true,
+                menus: vec!["work".into()],
+                menu_item: false,
                 dark: true,
             };
             for (_, group) in presets(&fc, false) {

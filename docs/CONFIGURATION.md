@@ -157,9 +157,11 @@ scan can be changed (left and right click never are).
 | `change-host` | Easy-Switch: sends the device to computer `1`, `2`, `3` or the `"next"` one; with `all = true` **every** connected device goes (e.g. keyboard and mouse together) | `{ action = "change-host", host = 2, all = true }` |
 | `brightness` | screen brightness: `change` by a percentage, or `set` a percentage | `{ action = "brightness", change = -10 }` |
 | `backlight` | keyboard backlight: `up`, `down` or `toggle` | `{ action = "backlight", change = "up" }` |
+| `desktop` | changes virtual desktop: `direction = "next"` or `"prev"` (Windows: Win+Ctrl+←/→; Linux: Ctrl+Alt+←/→) | `{ action = "desktop", direction = "next" }` |
 | `macro` | runs a macro defined in `[macros]` (see below); `repeat = 100` repeats it every 100 ms while held | `{ action = "macro", name = "signature" }` |
 | `sequence` | several steps in a row (a simple macro, see below) | `{ action = "sequence", steps = [ { keys = "Ctrl+C" } ] }` |
 | `gesture` | hold the button and move the pointer (see below) | `{ action = "gesture", up = { ... } }` |
+| `radial` | opens a radial menu under the pointer (any button of a pointing device, Windows; see below) | `{ action = "radial", menu = "work" }` |
 | `disable` | the button does nothing | `{ action = "disable" }` |
 | `default` | normal behaviour (same as not listing the button) | `{ action = "default" }` |
 
@@ -244,6 +246,66 @@ click = { action = "click", button = "middle" }          # no movement
 
 Only buttons marked **gestures** by `logirevctl scan` can follow the
 movement; on other buttons a gesture only performs its `click` action.
+
+### Radial menus (Windows)
+
+A radial menu is a ring of up to **eight** actions that opens **under the
+pointer**. Assign it to a button of a pointing device (mouse, trackball or
+trackpad) with the `radial` action; the button itself does not need gestures.
+
+```toml
+[menus.work]
+title = "Work"                       # optional, shown in the middle
+
+[[menus.work.items]]                 # clockwise, first item at the top
+label = "VS Code"
+icon  = "code"                       # optional
+action = { action = "command", command = "code.exe" }
+
+[[menus.work.items]]
+label = "Next desktop"
+icon = "desktop"
+action = { action = "desktop", direction = "next" }
+
+[[menus.work.items]]
+label = "Copy"
+action = { action = "keys", keys = "Ctrl+C" }
+
+[[profile]]
+name = "MX Ergo"
+[profile.buttons]
+precision = { action = "radial", menu = "work" }
+```
+
+- Items are drawn clockwise from 12 o'clock; `label` is shown under the icon
+  and is shortened with `…` when it does not fit. `title` appears in the
+  middle, under the close X.
+- Every item can run **any action** except `gesture`, `radial` (no nested
+  menus) and `default`: shortcuts, clicks, programs, macros, sequences,
+  `change-host`, brightness, `desktop`, `disable`...
+- Icons are optional; names: `app`, `browser`, `calculator`, `camera`,
+  `check`, `close`, `code`, `copy`, `crosshair`, `cut`, `desktop`, `file`,
+  `folder`, `grid`, `info`, `keyboard`, `left`, `light`, `lock`, `magic`,
+  `mute`, `next`, `paste`, `play`, `power`, `prev`, `refresh`, `right`,
+  `save`, `settings`, `stack`, `sun`, `terminal`, `undo`, `volume`,
+  `warning`, `windows`.
+- It can be assigned to **any configurable button** of a pointing device
+  (side buttons, wheel tilt, precision, gesture, any id shown by
+  `logirevctl scan` that is remappable), not just to one dedicated key.
+- Two ways to use it:
+  - **click:** press the button, the menu stays open; click a sector (or
+    click the X in the middle / anywhere outside to close);
+  - **hold, move, release:** keep the button pressed, move over a sector and
+    release it to run that item at once. Releasing in the middle keeps the
+    menu open for a click; releasing outside the ring cancels.
+  A release within about 0.2 s counts as a click, so a quick press never
+  chooses by accident.
+- The menu does not take the focus from the program you are using.
+- It is available in the Windows application (the one with the tray icon);
+  on Linux the service logs a warning and ignores it. To look at it without
+  a receiver: `logirev.exe --radial-demo`.
+- A menu can have no items while you are editing it, but a `radial` action
+  pointing at an empty menu does nothing.
 
 ### Key names
 

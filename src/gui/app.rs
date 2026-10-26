@@ -22,8 +22,8 @@ use super::form::{dpi_slider, ActionForm, FormContext};
 use super::i18n::{control_label, fill, Lang, T};
 use super::style::{self, icon, palette, ACCENT, BAD, GOOD, WARN};
 use crate::config::{
-    BacklightMode, Match, RawAction, RawApp, RawBacklight, RawConfig, RawMacro, RawProfile,
-    RawSmartShift, RawStep, SmartShiftMode,
+    BacklightMode, Match, RawAction, RawApp, RawBacklight, RawConfig, RawMacro, RawMenu,
+    RawMenuItem, RawProfile, RawSmartShift, RawStep, SmartShiftMode,
 };
 use crate::hidpp::features::{feature_name, DeviceKind, DISABLE_KEY_NAMES};
 use crate::hidpp::frame::RECEIVER_INDEX;
@@ -46,6 +46,7 @@ const RECONNECT_EVERY: Duration = Duration::from_secs(2);
 enum Page {
     Devices,
     Device { link: String, slot: u8 },
+    Menus,
     Macros,
     Settings,
     About,
@@ -100,6 +101,16 @@ struct Editor {
     form: ActionForm,
 }
 
+/// The "change this menu item" dialog.
+struct ItemEditor {
+    menu: String,
+    /// `Some(i)` edits an existing item, `None` adds one.
+    index: Option<usize>,
+    label: String,
+    icon: Option<String>,
+    form: ActionForm,
+}
+
 pub struct SettingsApp {
     lang: Lang,
     t: &'static T,
@@ -114,6 +125,7 @@ pub struct SettingsApp {
     page: Page,
     tab: Tab,
     editor: Option<Editor>,
+    item_editor: Option<ItemEditor>,
     /// The button row under the mouse (drawn highlighted next frame).
     hovered_row: Option<u16>,
     /// Developer mode: messages frozen by "Pause".
@@ -174,6 +186,7 @@ impl SettingsApp {
             page: Page::Devices,
             tab: Tab::Buttons,
             editor: None,
+            item_editor: None,
             hovered_row: None,
             traffic_paused: None,
             traffic_only_device: true,
@@ -200,6 +213,7 @@ impl SettingsApp {
                         slot: 2,
                     }
                 }
+                Ok("menus") => Page::Menus,
                 Ok("macros") => Page::Macros,
                 Ok("settings") => Page::Settings,
                 Ok("about") => Page::About,
@@ -553,6 +567,7 @@ impl SettingsApp {
         let device_page = matches!(self.page, Page::Device { .. });
         for (page, ic, label) in [
             (Page::Devices, icon::MOUSE, t.nav_devices),
+            (Page::Menus, icon::HAND_POINTING, t.nav_menus),
             (Page::Macros, icon::MAGIC_WAND, t.nav_macros),
             (Page::Settings, icon::GEAR, t.nav_settings),
             (Page::About, icon::INFO, t.nav_about),
@@ -648,6 +663,7 @@ impl SettingsApp {
         match self.page.clone() {
             Page::Devices => self.devices_page(ui),
             Page::Device { link, slot } => self.device_page(ui, &link, slot),
+            Page::Menus => self.menus_page(ui),
             Page::Macros => self.macros_page(ui),
             Page::Settings => self.settings_page(ui),
             Page::About => self.about_page(ui),
@@ -1678,6 +1694,9 @@ impl SettingsApp {
                 dpi_values: &ed.dpi_values,
                 gestures: ed.gestures,
                 macros: self.raw.macros.keys().cloned().collect(),
+                pointing: ed.kind.is_pointing(),
+                menus: self.raw.menus.keys().cloned().collect(),
+                menu_item: false,
                 dark: ui.visuals().dark_mode,
             };
             ScrollArea::vertical()
@@ -2083,6 +2102,319 @@ impl SettingsApp {
     }
 
     // ------------------------------------------------------------------
+    // Radial menus
+    // ------------------------------------------------------------------
+
+    fn menus_page(&mut self, ui: &mut Ui) {
+        let t = self.t;
+        let pal = palette(ui.visuals().dark_mode);
+        ui.label(RichText::new(t.menus_title).size(28.0).strong());
+        ui.label(RichText::new(t.menus_hint).color(pal.muted));
+        ui.add_space(8.0);
+        if ui
+            .button(format!("{}  {}", icon::PLUS, t.new_menu))
+            .clicked()
+        {
+            let mut n = self.raw.menus.len() + 1;
+            while self.raw.menus.contains_key(&format!("menu{n}")) {
+                n += 1;
+            }
+            self.raw.menus.insert(
+                format!("menu{n}"),
+                RawMenu {
+                    title: None,
+                    items: Vec::new(),
+                },
+            );
+            self.changed();
+        }
+
+        let names: Vec<String> = self.raw.menus.keys().cloned().collect();
+        let mut changed = false;
+        let mut rename: Option<(String, String)> = None;
+        let mut delete: Option<String> = None;
+        let mut edit: Option<(String, Option<usize>)> = None;
+        let mut move_item: Option<(String, usize, isize)> = None;
+        let mut remove_item: Option<(String, usize)> = None;
+
+        for name in &names {
+            let Some(menu) = self.raw.menus.get_mut(name) else {
+                continue;
+            };
+            ui.add_space(8.0);
+            section(
+                ui,
+                pal.card,
+                pal.border,
+                &format!("{}  {name}", icon::HAND_POINTING),
+                |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(t.menu_name);
+                        // The draft lives in egui memory until the field loses
+                        // focus: rebuilding it from `name` every frame would
+                        // discard what the user types.
+                        let draft_id = ui.scope_id().with(("menu-name", name));
+                        let mut new_name = ui
+                            .ctx()
+                            .data(|d| d.get_temp::<String>(draft_id))
+                            .unwrap_or_else(|| name.clone());
+                        let resp =
+                            ui.add(egui::TextEdit::singleline(&mut new_name).desired_width(200.0));
+                        if resp.changed() {
+                            ui.ctx()
+                                .data_mut(|d| d.insert_temp(draft_id, new_name.clone()));
+                        }
+                        if resp.lost_focus() {
+                            ui.ctx().data_mut(|d| d.remove::<String>(draft_id));
+                            let clean: String = new_name
+                                .trim()
+                                .chars()
+                                .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+                                .collect();
+                            if !clean.is_empty() && clean != *name {
+                                rename = Some((name.clone(), clean));
+                            }
+                        }
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if ui.button(format!("{} {}", icon::TRASH, t.delete)).clicked() {
+                                delete = Some(name.clone());
+                            }
+                        });
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label(t.menu_title);
+                        let mut title = menu.title.clone().unwrap_or_default();
+                        if ui
+                            .add(
+                                egui::TextEdit::singleline(&mut title)
+                                    .desired_width(260.0)
+                                    .hint_text(t.menu_title),
+                            )
+                            .changed()
+                        {
+                            menu.title = (!title.is_empty()).then_some(title);
+                            changed = true;
+                        }
+                    });
+                    ui.add_space(6.0);
+                    ui.label(
+                        RichText::new(format!("{}: {}", t.menu_items, menu.items.len()))
+                            .small()
+                            .color(pal.muted),
+                    );
+                    if menu.items.is_empty() {
+                        ui.label(RichText::new(t.menu_empty).small().color(pal.muted));
+                    }
+                    let len = menu.items.len();
+                    for (i, item) in menu.items.iter().enumerate() {
+                        card_row(ui, pal.card_hover, pal.border, |ui| {
+                            ui.label(
+                                RichText::new(
+                                    item.icon
+                                        .as_deref()
+                                        .and_then(crate::radial::icon_glyph)
+                                        .unwrap_or("•"),
+                                )
+                                .size(22.0)
+                                .color(ACCENT),
+                            );
+                            ui.vertical(|ui| {
+                                ui.label(RichText::new(&item.label).strong());
+                                let summary = ActionForm::from_raw(Some(&item.action)).summary(t);
+                                ui.label(RichText::new(summary).small().color(pal.muted));
+                            });
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if ui.button(icon::TRASH).on_hover_text(t.delete).clicked() {
+                                    remove_item = Some((name.clone(), i));
+                                }
+                                if i + 1 < len && ui.button(icon::CARET_DOWN).clicked() {
+                                    move_item = Some((name.clone(), i, 1));
+                                }
+                                if i > 0 && ui.button(icon::CARET_UP).clicked() {
+                                    move_item = Some((name.clone(), i, -1));
+                                }
+                                if ui
+                                    .button(format!("{} {}", icon::PENCIL, t.change))
+                                    .clicked()
+                                {
+                                    edit = Some((name.clone(), Some(i)));
+                                }
+                            });
+                        });
+                    }
+                    ui.add_space(4.0);
+                    if len < crate::radial::MAX_ITEMS {
+                        if ui
+                            .button(format!("{} {}", icon::PLUS, t.add_item))
+                            .clicked()
+                        {
+                            edit = Some((name.clone(), None));
+                        }
+                    } else {
+                        ui.label(RichText::new(t.menu_limit).small().color(pal.muted));
+                    }
+                },
+            );
+        }
+
+        if let Some((old, new)) = rename {
+            if !self.raw.menus.contains_key(&new) {
+                if let Some(menu) = self.raw.menus.remove(&old) {
+                    self.raw.menus.insert(new.clone(), menu);
+                    rename_menu_uses(&mut self.raw, &old, &new);
+                    changed = true;
+                }
+            }
+        }
+        if let Some(name) = delete {
+            self.raw.menus.remove(&name);
+            remove_menu_uses(&mut self.raw, &name);
+            changed = true;
+        }
+        if let Some((menu, index, delta)) = move_item {
+            if let Some(m) = self.raw.menus.get_mut(&menu) {
+                let target = index as isize + delta;
+                if target >= 0 && (target as usize) < m.items.len() {
+                    m.items.swap(index, target as usize);
+                    changed = true;
+                }
+            }
+        }
+        if let Some((menu, index)) = remove_item {
+            if let Some(m) = self.raw.menus.get_mut(&menu) {
+                if index < m.items.len() {
+                    m.items.remove(index);
+                    changed = true;
+                }
+            }
+        }
+        if let Some((menu, index)) = edit {
+            if let Some(m) = self.raw.menus.get(&menu) {
+                let (label, icon, form) = match index.and_then(|i| m.items.get(i)) {
+                    Some(item) => (
+                        item.label.clone(),
+                        item.icon.clone(),
+                        ActionForm::from_raw(Some(&item.action)),
+                    ),
+                    None => (String::new(), None, ActionForm::default()),
+                };
+                self.item_editor = Some(ItemEditor {
+                    menu,
+                    index,
+                    label,
+                    icon,
+                    form,
+                });
+            }
+        }
+        if changed {
+            self.changed();
+        }
+    }
+
+    /// The dialog that edits one item of a radial menu.
+    fn item_editor_dialog(&mut self, ctx: &egui::Context) {
+        let Some(mut ed) = self.item_editor.take() else {
+            return;
+        };
+        let t = self.t;
+        let mut result: Option<bool> = None;
+        let modal = egui::Modal::new(egui::Id::NULL.with("logirev-item-editor")).show(ctx, |ui| {
+            ui.set_width(560.0);
+            ui.label(
+                RichText::new(if ed.index.is_some() {
+                    t.edit_item
+                } else {
+                    t.new_item
+                })
+                .size(20.0)
+                .strong(),
+            );
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.label(t.item_label);
+                ui.add(egui::TextEdit::singleline(&mut ed.label).desired_width(300.0));
+            });
+            ui.horizontal(|ui| {
+                ui.label(t.item_icon);
+                let (glyph, name) = match ed.icon.as_deref().and_then(crate::radial::icon_glyph) {
+                    Some(glyph) => (glyph, ed.icon.clone().unwrap_or_default()),
+                    None => ("", t.no_icon.to_owned()),
+                };
+                ComboBox::from_id_salt("menu-item-icon")
+                    .selected_text(format!("{glyph} {name}"))
+                    .show_ui(ui, |ui| {
+                        if ui.selectable_label(ed.icon.is_none(), t.no_icon).clicked() {
+                            ed.icon = None;
+                        }
+                        for (name, glyph) in crate::radial::ICONS {
+                            if ui
+                                .selectable_label(
+                                    ed.icon.as_deref() == Some(*name),
+                                    format!("{glyph}  {name}"),
+                                )
+                                .clicked()
+                            {
+                                ed.icon = Some((*name).to_owned());
+                            }
+                        }
+                    });
+            });
+            ui.add_space(8.0);
+            let fc = FormContext {
+                t,
+                dpi_values: &[],
+                gestures: false,
+                macros: self.raw.macros.keys().cloned().collect(),
+                pointing: false,
+                menus: Vec::new(),
+                menu_item: true,
+                dark: ui.visuals().dark_mode,
+            };
+            ScrollArea::vertical()
+                .max_height((ctx.content_rect().height() - 230.0).max(220.0))
+                .show(ui, |ui| {
+                    ed.form.ui(ui, &fc, "menu-item", false);
+                });
+            ui.add_space(10.0);
+            ui.separator();
+            ui.horizontal(|ui| {
+                let valid = !ed.label.trim().is_empty() && ed.form.to_raw().is_some();
+                let button =
+                    egui::Button::new(RichText::new(t.save).color(Color32::WHITE)).fill(ACCENT);
+                if ui.add_enabled(valid, button).clicked() {
+                    result = Some(true);
+                }
+                if ui.button(t.cancel).clicked() {
+                    result = Some(false);
+                }
+            });
+        });
+        if modal.should_close() && result.is_none() {
+            result = Some(false);
+        }
+        match result {
+            Some(true) => {
+                let action = ed.form.to_raw();
+                if let (Some(action), Some(menu)) = (action, self.raw.menus.get_mut(&ed.menu)) {
+                    let item = RawMenuItem {
+                        label: ed.label.trim().to_owned(),
+                        icon: ed.icon.clone().filter(|i| !i.is_empty()),
+                        action,
+                    };
+                    match ed.index {
+                        Some(i) if i < menu.items.len() => menu.items[i] = item,
+                        _ => menu.items.push(item),
+                    }
+                    self.changed();
+                }
+            }
+            Some(false) => {}
+            None => self.item_editor = Some(ed),
+        }
+    }
+
+    // ------------------------------------------------------------------
     // Settings and about
     // ------------------------------------------------------------------
 
@@ -2461,6 +2793,7 @@ impl eframe::App for SettingsApp {
                     });
             });
         self.editor_dialog(&ctx);
+        self.item_editor_dialog(&ctx);
         self.pairing_dialog(&ctx);
         self.save_toast(&ctx);
         self.unpair_dialog(&ctx);
@@ -2756,12 +3089,17 @@ fn steps_editor(ui: &mut Ui, steps: &mut Vec<RawStep>, t: &T, id: &str) -> bool 
     changed
 }
 
-/// Every button action anywhere in the configuration.
+/// Every button action anywhere in the configuration (including menu items).
 fn all_actions(raw: &mut RawConfig) -> impl Iterator<Item = &mut RawAction> {
-    raw.profiles.iter_mut().flat_map(|p| {
+    let buttons = raw.profiles.iter_mut().flat_map(|p| {
         let apps = p.apps.iter_mut().flat_map(|a| a.buttons.values_mut());
         p.buttons.values_mut().chain(apps)
-    })
+    });
+    let menu_items = raw
+        .menus
+        .values_mut()
+        .flat_map(|m| m.items.iter_mut().map(|i| &mut i.action));
+    buttons.chain(menu_items)
 }
 
 fn rename_macro_uses(raw: &mut RawConfig, old: &str, new: &str) {
@@ -2777,6 +3115,24 @@ fn rename_macro_uses(raw: &mut RawConfig, old: &str, new: &str) {
 fn remove_macro_uses(raw: &mut RawConfig, gone: &str) {
     for a in all_actions(raw) {
         if matches!(a, RawAction::Macro { name, .. } if name == gone) {
+            *a = RawAction::Disable;
+        }
+    }
+}
+
+fn rename_menu_uses(raw: &mut RawConfig, old: &str, new: &str) {
+    for a in all_actions(raw) {
+        if let RawAction::Radial { menu } = a {
+            if menu == old {
+                *menu = new.to_owned();
+            }
+        }
+    }
+}
+
+fn remove_menu_uses(raw: &mut RawConfig, gone: &str) {
+    for a in all_actions(raw) {
+        if matches!(a, RawAction::Radial { menu } if menu == gone) {
             *a = RawAction::Disable;
         }
     }
@@ -3096,14 +3452,35 @@ mod tests {
     #[test]
     fn renames_and_removes_macro_uses() {
         let mut raw = RawConfig::parse(
-            "[macros.a]\nsteps = [ { keys = \"A\" } ]\n[[profile]]\nname = \"p\"\nbuttons.back = { action = \"macro\", name = \"a\" }",
+            "[macros.a]\nsteps = [ { keys = \"A\" } ]\n[[profile]]\nname = \"p\"\nbuttons.back = { action = \"macro\", name = \"a\" }\n[menus.m]\nitems = [ { label = \"x\", action = { action = \"macro\", name = \"a\" } } ]",
         )
         .unwrap();
         rename_macro_uses(&mut raw, "a", "b");
         assert!(
             matches!(&raw.profiles[0].buttons["back"], RawAction::Macro { name, .. } if name == "b")
         );
+        assert!(
+            matches!(&raw.menus["m"].items[0].action, RawAction::Macro { name, .. } if name == "b")
+        );
         remove_macro_uses(&mut raw, "b");
+        assert!(matches!(
+            raw.profiles[0].buttons["back"],
+            RawAction::Disable
+        ));
+        assert!(matches!(raw.menus["m"].items[0].action, RawAction::Disable));
+    }
+
+    #[test]
+    fn renames_and_removes_menu_uses() {
+        let mut raw = RawConfig::parse(
+            "[menus.old]\nitems = [ { label = \"x\", action = { action = \"desktop\", direction = \"next\" } } ]\n[[profile]]\nname = \"p\"\nbuttons.back = { action = \"radial\", menu = \"old\" }",
+        )
+        .unwrap();
+        rename_menu_uses(&mut raw, "old", "new");
+        assert!(
+            matches!(&raw.profiles[0].buttons["back"], RawAction::Radial { menu } if menu == "new")
+        );
+        remove_menu_uses(&mut raw, "new");
         assert!(matches!(
             raw.profiles[0].buttons["back"],
             RawAction::Disable

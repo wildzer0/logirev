@@ -25,6 +25,7 @@
 #[cfg(not(feature = "gui"))]
 mod devices;
 mod osd;
+mod radial;
 mod scroll;
 mod tray;
 mod util;
@@ -76,6 +77,8 @@ struct State {
     hwnd: HWND,
     tray: Tray,
     osd: Option<osd::Osd>,
+    /// The radial-menu window (created once, shown on demand).
+    radial: Option<radial::RadialWindow>,
     /// Show the battery on the tray icon.
     tray_battery: bool,
     #[cfg(not(feature = "gui"))]
@@ -103,6 +106,9 @@ thread_local! {
 
 /// Runs the tray application until the user picks "Quit" or logs off.
 pub fn run(opts: &ServiceOptions) -> ExitCode {
+    if opts.radial_demo {
+        return radial::demo();
+    }
     let prepared = match app::prepare(opts, false) {
         Ok(p) => p,
         Err(e) if e.contains("already running") && cfg!(feature = "gui") => {
@@ -207,6 +213,10 @@ fn start(p: Prepared, opts: &ServiceOptions) -> Result<(), String> {
     if osd.is_none() {
         warn!("cannot create the on-screen message window");
     }
+    let radial = radial::RadialWindow::create(instance);
+    if radial.is_none() {
+        warn!("cannot create the radial menu window");
+    }
     register_device_notifications(hwnd);
     // SAFETY: NUL-terminated string.
     let taskbar_created = unsafe { RegisterWindowMessageW(util::wide("TaskbarCreated").as_ptr()) };
@@ -265,6 +275,7 @@ fn start(p: Prepared, opts: &ServiceOptions) -> Result<(), String> {
             hwnd,
             tray,
             osd,
+            radial,
             tray_battery: true,
             #[cfg(not(feature = "gui"))]
             devices,
@@ -421,6 +432,21 @@ fn drain_updates() {
                         .flatten();
                     s.tray.set_battery(battery);
                     scroll::configure(p.scroll_percent, p.smooth_scrolling);
+                }
+                UiUpdate::Radial(menu) => {
+                    if let Some(window) = &s.radial {
+                        window.show(&menu, &s.tx);
+                    } else {
+                        // No window: let the service forget the request.
+                        let _ = s.tx.send(Event::RadialCancel { id: menu.id });
+                    }
+                }
+                UiUpdate::RadialRelease { id } => {
+                    if let Some(window) = &s.radial {
+                        window.release(id);
+                    } else {
+                        let _ = s.tx.send(Event::RadialCancel { id });
+                    }
                 }
             }
         }

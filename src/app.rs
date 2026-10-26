@@ -37,6 +37,8 @@ pub struct ServiceOptions {
     pub background: bool,
     /// Restarting after an update: wait for the previous copy to exit.
     pub after_update: bool,
+    /// Show the radial menu with sample items (Windows; checks the look).
+    pub radial_demo: bool,
 }
 
 /// Everything the daemon needs, ready to go.

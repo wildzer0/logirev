@@ -297,6 +297,14 @@ impl DeviceKind {
             _ => Self::Other,
         }
     }
+
+    /// The device points at the screen (mouse, trackball, trackpad).
+    ///
+    /// Only these devices can open the radial menu: it needs a pointer to
+    /// move over the sectors.
+    pub fn is_pointing(self) -> bool {
+        matches!(self, Self::Mouse | Self::Trackball | Self::Trackpad)
+    }
 }
 
 impl fmt::Display for DeviceKind {
@@ -1101,5 +1109,15 @@ mod tests {
         assert_eq!(parse_control("0x00FD"), Some(0xFD));
         assert_eq!(parse_control("86"), Some(0x56));
         assert_eq!(parse_control("nope"), None);
+    }
+
+    #[test]
+    fn pointing_devices_are_known() {
+        assert!(DeviceKind::Mouse.is_pointing());
+        assert!(DeviceKind::Trackball.is_pointing());
+        assert!(DeviceKind::Trackpad.is_pointing());
+        assert!(!DeviceKind::Keyboard.is_pointing());
+        assert!(!DeviceKind::Remote.is_pointing());
+        assert!(!DeviceKind::Other.is_pointing());
     }
 }

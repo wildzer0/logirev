@@ -96,6 +96,7 @@ fn main() -> ExitCode {
             pcap: cli.pcap.clone(),
             background: true,
             after_update: false,
+            radial_demo: false,
         }),
         Cmd::Scan { hidden } => {
             console_logging(&cli).and_then(|()| cmd_scan(&cli, &config_path, *hidden))

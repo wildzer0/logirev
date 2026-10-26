@@ -3,6 +3,27 @@
 All notable changes are listed here. Versions follow
 [Semantic Versioning](https://semver.org).
 
+## [1.4.0-rc.1] — 2026-10-26
+
+Release candidate for testing the radial menu (the Windows look and the
+holding gesture are not verified on hardware yet).
+
+### Added
+- **Radial menus** (Windows): a ring of up to eight custom actions that
+  opens under the mouse pointer when any configurable button of a mouse,
+  trackball or trackpad is pressed. Each item can run any action (program,
+  shortcut, macro, desktop...); the menu does not take the focus. It can be
+  used with a **click** (opens and stays open) or by **holding the button,
+  moving over a sector and releasing**; the quick click never chooses by
+  accident. New *Radial menus* page in the settings window.
+- `logirev.exe --radial-demo` shows a sample menu without a receiver.
+- New `desktop` action (`next` / `prev`) to change virtual desktop,
+  available in buttons, gestures and menu items.
+
+### Changed
+- The button editor offers the *Radial menu* action only for pointing
+  devices, and the ready-made actions include *Next/Previous desktop*.
+
 ## [1.3.1] — 2026-10-24
 
 ### Fixed

@@ -190,6 +190,36 @@ pub enum UiUpdate {
     Osd(String),
     /// Settings the tray process applies itself (at start and on reload).
     Preferences(Preferences),
+    /// Open the radial menu at the pointer (Windows).
+    Radial(RadialMenu),
+    /// The button that opened the radial menu was released (request `id`):
+    /// the window selects the sector under the pointer, or keeps the menu
+    /// open when the pointer is still in the middle (a quick click).
+    RadialRelease {
+        /// Request the interface is answering.
+        id: u64,
+    },
+}
+
+/// A radial menu to show, with the items but not their actions (the service
+/// keeps those and performs the one chosen).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RadialMenu {
+    /// Identifies the request; the choice is sent back with the same id.
+    pub id: u64,
+    /// Title shown in the middle, if any.
+    pub title: Option<String>,
+    /// The sectors, clockwise from the top.
+    pub items: Vec<RadialItem>,
+}
+
+/// One sector of a [`RadialMenu`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RadialItem {
+    /// Text shown in the sector.
+    pub label: String,
+    /// Icon name (see [`crate::radial`]), if any.
+    pub icon: Option<String>,
 }
 
 /// Settings applied by the tray process rather than by the service.

@@ -41,8 +41,8 @@ use hidapi::HidApi;
 use log::{debug, error, info, warn};
 
 use crate::config::{
-    self, Action, BacklightChange, BacklightMode, Config, Gesture, HostTarget, Macro, Profile,
-    SlowMode, Step,
+    self, Action, BacklightChange, BacklightMode, Config, DesktopDirection, Gesture, HostTarget,
+    Macro, Profile, SlowMode, Step,
 };
 use crate::hidpp::diagnostics;
 use crate::hidpp::features::{
@@ -57,7 +57,7 @@ use crate::input::{self, Injector, Key};
 use crate::pcap::PcapWriter;
 use crate::status::{
     ControlInfo, DeviceDetails, DeviceStatus, HostsStatus, LinkStatus, PairingStatus, Preferences,
-    Snapshot, UiHooks, UiUpdate,
+    RadialItem, RadialMenu, Snapshot, UiHooks, UiUpdate,
 };
 
 /// HID++ 1.0 notification sent by a receiver when a device (dis)connects.
@@ -91,6 +91,8 @@ const RESCAN_DEBOUNCE: Duration = Duration::from_millis(500);
 /// Developer mode: send recent HID++ messages to the window at most this
 /// often.
 const TRAFFIC_EVERY: Duration = Duration::from_millis(400);
+/// How long a radial menu waits for a choice before it is forgotten.
+const RADIAL_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Something the event loop must react to.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -140,6 +142,18 @@ pub enum Event {
     },
     /// A newer version is published (from the update checker).
     UpdateAvailable(String),
+    /// The radial menu was used: item `index` of request `id`.
+    RadialSelect {
+        /// Request the interface is answering (see [`UiUpdate::Radial`]).
+        id: u64,
+        /// Position of the item in the menu, counted from 0.
+        index: usize,
+    },
+    /// The radial menu was closed without choosing (request `id`).
+    RadialCancel {
+        /// Request the interface is answering.
+        id: u64,
+    },
     /// Stop: restore every device and return.
     Quit,
 }
@@ -187,6 +201,9 @@ pub fn run(
         traffic_seen: 0,
         traffic_sent: Instant::now(),
         traffic_due: None,
+        radial: None,
+        radial_id: 0,
+        radial_warned: false,
     };
     daemon.rescan();
     daemon.publish();
@@ -223,6 +240,12 @@ struct Daemon {
     traffic_seen: u64,
     traffic_sent: Instant,
     traffic_due: Option<Instant>,
+    /// A radial menu shown by the interface, waiting for a choice.
+    radial: Option<PendingRadial>,
+    /// Last radial-menu request number.
+    radial_id: u64,
+    /// The "no interface / not Windows" warning was logged.
+    radial_warned: bool,
 }
 
 /// What a [`Link`] needs from the daemon while handling events.
@@ -236,6 +259,43 @@ struct Ctx<'a> {
     /// A button asked to send *every* device to another computer; done by
     /// the daemon after the pass because it involves all links.
     switch_all: Option<HostTarget>,
+    /// A button asked to open a radial menu; opened by the daemon after the
+    /// pass because it needs the configuration and the interface.
+    radial: Option<OpenRadial>,
+    /// The button that opened the menu was just released, so the window can
+    /// use the "hold, move, release" gesture.
+    radial_release: Option<RadialRelease>,
+    /// Control id of the button that is opening a radial menu right now.
+    radial_cid: Option<u16>,
+}
+
+/// A radial menu requested by a button.
+struct OpenRadial {
+    /// Receiver, as [`LinkStatus::key`].
+    link: String,
+    /// Receiver slot of the device whose button was used.
+    slot: u8,
+    /// Name of the `[menus.<name>]` block to show.
+    menu: String,
+    /// Control id of the button, when it comes from a diverted button.
+    cid: Option<u16>,
+}
+
+/// The release of the button that opened a radial menu.
+struct RadialRelease {
+    link: String,
+    slot: u8,
+    cid: u16,
+}
+
+/// A radial menu shown by the interface and waiting for a choice.
+struct PendingRadial {
+    id: u64,
+    link: String,
+    slot: u8,
+    cid: Option<u16>,
+    menu: crate::config::Menu,
+    deadline: Instant,
 }
 
 /// Builds the [`Ctx`] for links from a daemon. A macro rather than a method
@@ -248,6 +308,9 @@ macro_rules! ctx {
             app: $daemon.app.as_deref(),
             notices: Vec::new(),
             switch_all: None,
+            radial: None,
+            radial_release: None,
+            radial_cid: None,
         }
     };
 }
@@ -304,6 +367,12 @@ impl Daemon {
                             l.unpair(&mut ctx, slot);
                         }
                     }
+                    Event::RadialSelect { id, index } => self.radial_select(id, index),
+                    Event::RadialCancel { id } => {
+                        if self.radial.as_ref().is_some_and(|r| r.id == id) {
+                            self.radial = None;
+                        }
+                    }
                     Event::Hid => {}
                 }
             }
@@ -311,6 +380,14 @@ impl Daemon {
                 self.rescan();
             }
             self.pump();
+            if self
+                .radial
+                .as_ref()
+                .is_some_and(|r| r.deadline <= Instant::now())
+            {
+                debug!("the radial menu was not used; forgetting it");
+                self.radial = None;
+            }
             if Instant::now() >= self.next_housekeeping {
                 self.housekeeping();
             }
@@ -336,6 +413,7 @@ impl Daemon {
             .chain(std::iter::once(self.next_housekeeping))
             .chain(self.rescan_due)
             .chain(self.traffic_due)
+            .chain(self.radial.as_ref().map(|r| r.deadline))
             .min()
             .unwrap_or(self.next_housekeeping)
     }
@@ -353,6 +431,9 @@ impl Daemon {
             if let Some(reason) = self.links[i].lost.clone() {
                 let mut link = self.links.remove(i);
                 link.release_all(&mut ctx);
+                if self.radial.as_ref().is_some_and(|r| r.link == link.key) {
+                    self.radial = None;
+                }
                 warn!("lost connection to {}: {reason}", link.t.name);
                 self.dirty = true;
             } else {
@@ -365,7 +446,20 @@ impl Daemon {
                 (h.observer)(UiUpdate::Osd(event.text(italian)));
             }
         }
-        let (notices, switch_all) = (ctx.notices, ctx.switch_all);
+        let (notices, switch_all, radial, radial_release) =
+            (ctx.notices, ctx.switch_all, ctx.radial, ctx.radial_release);
+        self.finish_effects(notices, switch_all, radial, radial_release);
+    }
+
+    /// Applies what the actions of one pass asked for and involves the whole
+    /// daemon (messages, "send every device", the radial menu).
+    fn finish_effects(
+        &mut self,
+        notices: Vec<(String, String)>,
+        switch_all: Option<HostTarget>,
+        radial: Option<OpenRadial>,
+        radial_release: Option<RadialRelease>,
+    ) {
         for (title, text) in notices {
             self.notify(&title, &text);
         }
@@ -378,6 +472,112 @@ impl Daemon {
                 }
             }
         }
+        if let Some(request) = radial {
+            self.open_radial(request);
+        }
+        if let Some(release) = radial_release {
+            self.release_radial(release);
+        }
+    }
+
+    /// Shows a radial menu requested by a button.
+    fn open_radial(&mut self, request: OpenRadial) {
+        // Only the tray process has a window that can show it.
+        if !cfg!(windows) || !self.hooks.as_ref().is_some_and(|h| h.hotplug_events) {
+            if !self.radial_warned {
+                self.radial_warned = true;
+                warn!("the radial menu needs the Windows tray application; ignoring it");
+            }
+            return;
+        }
+        let Some(menu) = self.cfg.menus.get(&request.menu).cloned() else {
+            warn!(
+                "slot {}: radial menu \"{}\" does not exist",
+                request.slot, request.menu
+            );
+            return;
+        };
+        if menu.items.is_empty() {
+            warn!(
+                "slot {}: radial menu \"{}\" has no items",
+                request.slot, request.menu
+            );
+            return;
+        }
+        self.radial_id = self.radial_id.saturating_add(1);
+        let id = self.radial_id;
+        let status = RadialMenu {
+            id,
+            title: menu.title.clone(),
+            items: menu
+                .items
+                .iter()
+                .map(|item| RadialItem {
+                    label: item.label.clone(),
+                    icon: item.icon.clone(),
+                })
+                .collect(),
+        };
+        self.radial = Some(PendingRadial {
+            id,
+            link: request.link,
+            slot: request.slot,
+            cid: request.cid,
+            menu,
+            deadline: Instant::now() + RADIAL_TIMEOUT,
+        });
+        if let Some(hooks) = &self.hooks {
+            (hooks.observer)(UiUpdate::Radial(status));
+        }
+        info!("slot {}: radial menu open", request.slot);
+    }
+
+    /// The button that opened the menu was released: let the window choose
+    /// with the "hold, move, release" gesture (a quick click keeps it open).
+    fn release_radial(&mut self, release: RadialRelease) {
+        let Some(pending) = &self.radial else {
+            return;
+        };
+        if pending.link != release.link
+            || pending.slot != release.slot
+            || pending.cid != Some(release.cid)
+        {
+            return;
+        }
+        let id = pending.id;
+        if let Some(hooks) = &self.hooks {
+            (hooks.observer)(UiUpdate::RadialRelease { id });
+        }
+    }
+
+    /// Performs the item the user picked in the radial menu.
+    fn radial_select(&mut self, id: u64, index: usize) {
+        let Some(pending) = self.radial.take().filter(|r| r.id == id) else {
+            return;
+        };
+        let Some(action) = pending.menu.items.get(index).map(|i| i.action.clone()) else {
+            warn!("radial menu: item {} does not exist", index + 1);
+            return;
+        };
+        let mut ctx = ctx!(self);
+        match self.links.iter_mut().find(|l| l.key == pending.link) {
+            Some(link) if link.sessions.contains_key(&pending.slot) => {
+                info!(
+                    "slot {}: radial menu -> {}",
+                    pending.slot,
+                    summarize(&action)
+                );
+                link.perform(&mut ctx, pending.slot, &action, true);
+                link.perform(&mut ctx, pending.slot, &action, false);
+            }
+            _ => warn!(
+                "slot {}: device is gone, radial choice ignored",
+                pending.slot
+            ),
+        }
+        let (notices, switch_all, radial, radial_release) =
+            (ctx.notices, ctx.switch_all, ctx.radial, ctx.radial_release);
+        self.finish_effects(notices, switch_all, radial, radial_release);
     }
 
     /// Applies the buttons configured for the program now in front.
@@ -911,6 +1111,14 @@ impl Link {
 
         for (cid, action) in released {
             debug!("slot {slot}: button {} released", describe(cid));
+            if matches!(&action, Action::Radial { .. }) {
+                // Let the menu use "hold, move, release" if it is still open.
+                ctx.radial_release = Some(RadialRelease {
+                    link: self.key.clone(),
+                    slot,
+                    cid,
+                });
+            }
             if let Some(s) = self.sessions.get_mut(&slot) {
                 if s.repeat.as_ref().is_some_and(|r| r.cid == cid) {
                     s.repeat = None;
@@ -933,6 +1141,9 @@ impl Link {
                     s.gesture = Some(GestureState { cid, dx: 0, dy: 0 });
                 }
             } else {
+                if matches!(&action, Action::Radial { .. }) {
+                    ctx.radial_cid = Some(cid);
+                }
                 self.perform(ctx, slot, &action, true);
                 if let Action::Sequence(m) = &action {
                     if let (Some(ms), Some(s)) = (m.repeat, self.sessions.get_mut(&slot)) {
@@ -1108,6 +1319,35 @@ impl Link {
                     ctx.switch_all = Some(*target);
                 } else {
                     self.change_host(slot, *target);
+                }
+                Ok(())
+            }
+            Action::Desktop(direction) => match ctx.injector.as_deref_mut() {
+                Some(inj) if down => desktop_chord(*direction)
+                    .iter()
+                    .try_for_each(|k| inj.key(k, true)),
+                Some(inj) => desktop_chord(*direction)
+                    .iter()
+                    .rev()
+                    .try_for_each(|k| inj.key(k, false)),
+                None => Ok(()),
+            },
+            Action::Radial { menu } if down => {
+                // Any diverted control can open it; only the device kind
+                // matters (the menu needs a pointer).
+                if self
+                    .sessions
+                    .get(&slot)
+                    .is_some_and(|s| s.kind.is_pointing())
+                {
+                    ctx.radial = Some(OpenRadial {
+                        link: self.key.clone(),
+                        slot,
+                        menu: menu.clone(),
+                        cid: ctx.radial_cid.take(),
+                    });
+                } else {
+                    warn!("slot {slot}: the radial menu is only for pointing devices");
                 }
                 Ok(())
             }
@@ -1995,6 +2235,8 @@ fn summarize(action: &Action) -> String {
         Action::Brightness(crate::config::BrightnessChange::To(p)) => format!("brightness {p}%"),
         Action::Backlight(c) => format!("backlight {c:?}").to_lowercase(),
         Action::Gesture(_) => "gesture".into(),
+        Action::Radial { menu } => format!("radial menu \"{menu}\""),
+        Action::Desktop(direction) => format!("desktop {direction:?}").to_lowercase(),
         Action::Disable => "nothing".into(),
     }
 }
@@ -2004,6 +2246,21 @@ fn on_off(b: bool) -> &'static str {
         "on"
     } else {
         "off"
+    }
+}
+
+/// The keys that switch virtual desktop on this system: `Win+Ctrl+←/→` on
+/// Windows, `Ctrl+Alt+←/→` on Linux (the X11 convention).
+fn desktop_chord(direction: DesktopDirection) -> [&'static Key; 3] {
+    let key = |name: &str| crate::input::keys::lookup(name).expect("key table");
+    let arrow = match direction {
+        DesktopDirection::Next => key("Right"),
+        DesktopDirection::Prev => key("Left"),
+    };
+    if cfg!(windows) {
+        [key("Super"), key("Ctrl"), arrow]
+    } else {
+        [key("Ctrl"), key("Alt"), arrow]
     }
 }
 
@@ -2033,5 +2290,30 @@ mod tests {
             }),
             "scroll (0, -3)"
         );
+        assert_eq!(
+            summarize(&Action::Desktop(DesktopDirection::Next)),
+            "desktop next"
+        );
+        assert_eq!(
+            summarize(&Action::Radial {
+                menu: "work".into()
+            }),
+            "radial menu \"work\""
+        );
+    }
+
+    #[test]
+    fn desktop_chords_use_the_system_shortcut() {
+        let next = desktop_chord(DesktopDirection::Next);
+        let prev = desktop_chord(DesktopDirection::Prev);
+        assert_eq!(next[2].name, "Right");
+        assert_eq!(prev[2].name, "Left");
+        if cfg!(windows) {
+            assert_eq!(next[0].name, "Super");
+            assert_eq!(next[1].name, "Ctrl");
+        } else {
+            assert_eq!(next[0].name, "Ctrl");
+            assert_eq!(next[1].name, "Alt");
+        }
     }
 }

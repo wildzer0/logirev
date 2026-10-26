@@ -51,6 +51,10 @@ struct Cli {
     /// Restart after an update (waits for the previous copy to exit)
     #[arg(long, hide = true)]
     after_update: bool,
+
+    /// Show the radial menu with sample items, then exit (Windows only)
+    #[arg(long, hide = true)]
+    radial_demo: bool,
 }
 
 /// Opens the settings window, if this build has one.
@@ -73,6 +77,7 @@ impl Cli {
             pcap: self.pcap,
             background: self.background,
             after_update: self.after_update,
+            radial_demo: self.radial_demo,
         }
     }
 }
@@ -102,6 +107,10 @@ fn main() -> ExitCode {
         return settings(&cli.options());
     }
     let opts = cli.options();
+    if opts.radial_demo {
+        eprintln!("the radial menu is only available on Windows");
+        return ExitCode::FAILURE;
+    }
     match logirev::app::run_service(&opts) {
         Ok(()) => ExitCode::SUCCESS,
         Err(msg) => {

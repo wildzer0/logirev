@@ -193,3 +193,20 @@ latest published release (e.g. set `version = "0.9.0"` locally).
 | J1 | `logirevctl scan` while logirev runs | Works; lists all slots including sleeping ones. |
 | J2 | Quit logirev; `logirevctl run --log-level debug --pcap test.pcap`, use the buttons, Ctrl+C | Live log in the terminal; `test.pcap` opens in Wireshark. |
 | J3 | With `tools/hidpp.lua` installed in Wireshark | Packets decoded as HID++ (filter `hidpp`). |
+
+## Q. Radial menus (Windows)
+
+| # | Do | Expect |
+|---|---|---|
+| Q1 | Run `logirev.exe --radial-demo` (quit logirev first only if it complains) | A dark ring appears under the pointer with six example items, icons and the title "logirev"; it fades in, does not steal the focus; clicking a sector or the X closes it. |
+| Q2 | Hover the sectors | The sector under the pointer turns cyan/blue; labels stay readable; the X in the middle is visible. |
+| Q3 | *Radial menus* → *New menu* → name it `work` → add two items: "Calculator" (`command = calc.exe`) and "Next desktop" (`desktop`, next); assign it to Back in the MX Ergo page (*Buttons* → Back → *Radial menu* → `work`) | Within a second Back opens the menu under the pointer; clicking "Calculator" opens it; clicking "Next desktop" switches desktop; clicking outside or the X closes without doing anything. |
+| Q4 | Set the item icon (e.g. `code`), rename the menu, reorder items, delete one | The menu reflects the changes after the automatic save; renaming also updates the button that opens it. |
+| Q5 | Assign a radial menu to a keyboard button by hand in `logirev.toml` | The log warns that only pointing devices can open it and the button does not open anything. |
+| Q6 | Eight items; use a long label | All sectors are visible; the long label is shortened with `…`; no sector overlaps. |
+| Q7 | Display at 150 %/200 % and a monitor at the right/bottom edge | The ring is sharp and stays completely on screen (it shifts away from the edge). |
+| Q8 | `logirev.exe --radial-demo` on Linux (if built with the window) | The program exits with "the radial menu is only available on Windows". |
+| Q9 | Test with the "Desktop next/previous" preset in the button editor | On Windows Win+Ctrl+←/→ switches virtual desktop; on Linux Ctrl+Alt+←/→ (X11). |
+| Q10 | Assign the same menu to `tilt_left` and to the middle button | Both open the menu: it works on **any** configurable button of the pointing device, not just one dedicated key. |
+| Q11 | Press and hold the button, move over a sector, release | The item runs immediately; releasing in the middle keeps the menu open; releasing outside the ring closes it. |
+| Q12 | Quick click on the button (release in less than ~0.2 s) | The menu stays open for a click instead of choosing a sector by accident. |

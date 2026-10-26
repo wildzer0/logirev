@@ -66,6 +66,7 @@ macro_rules! texts {
 texts! {
     // Navigation
     nav_devices => "Devices", "Dispositivi";
+    nav_menus => "Radial menus", "Menù radiali";
     nav_macros => "Macros", "Macro";
     nav_settings => "Settings", "Impostazioni";
     nav_about => "About", "Informazioni";
@@ -208,6 +209,10 @@ texts! {
     act_brightness => "Screen brightness", "Luminosità dello schermo";
     act_backlight => "Keyboard backlight", "Retroilluminazione tastiera";
     act_macro => "Macro", "Macro";
+    act_radial => "Radial menu", "Menù radiale";
+    act_desktop => "Switch desktop", "Cambia desktop";
+    desktop_next => "Next desktop", "Desktop successivo";
+    desktop_prev => "Previous desktop", "Desktop precedente";
     act_gesture => "Gestures (hold and move)", "Gesture (tieni premuto e muovi)";
     act_custom => "Custom (set in the file)", "Personalizzata (nel file)";
     current_action => "Now: {}", "Ora: {}";
@@ -284,6 +289,8 @@ texts! {
     p_select_all => "Select all", "Seleziona tutto";
     p_task_view => "Task view", "Visualizzazione attività";
     p_desktop => "Show desktop", "Mostra desktop";
+    p_desktop_next => "Next desktop", "Desktop successivo";
+    p_desktop_prev => "Previous desktop", "Desktop precedente";
     p_switch_app => "Switch window", "Cambia finestra";
     p_lock => "Lock the PC", "Blocca il PC";
     p_screenshot => "Screenshot", "Cattura schermo";
@@ -333,6 +340,10 @@ texts! {
     backlight_down => "Darker", "Meno luminosa";
     backlight_toggle => "On / off", "Accendi / spegni";
     no_macros => "No macro yet: create one in the Macros page.", "Nessuna macro: creane una nella pagina Macro.";
+    no_menus => "No radial menu yet: create one in the Radial menus page.",
+        "Nessun menù radiale: creane uno nella pagina Menù radiali.";
+    radial_pointing_only => "A radial menu can only be opened by a pointing device (mouse, trackball, trackpad).",
+        "Un menù radiale può essere aperto solo da un dispositivo di puntamento (mouse, trackball, touchpad).";
     repeat_held => "Repeat while the button is held", "Ripeti finché il tasto è premuto";
     every_ms => "Every (ms)", "Ogni (ms)";
     gesture_click => "Press without moving", "Pressione senza movimento";
@@ -353,6 +364,23 @@ texts! {
     step_click => "Click", "Clic";
     step_delay => "Wait (ms)", "Attendi (ms)";
     delete => "Delete", "Elimina";
+
+    // Radial menus page
+    menus_title => "Radial menus", "Menù radiali";
+    menus_hint => "A radial menu opens under the pointer when any button of a mouse, trackball or trackpad is pressed. Click a sector, or hold the button, move over it and release. Up to eight items, clockwise from the top; each item runs any action.",
+        "Un menù radiale si apre sotto il puntatore quando si preme un tasto qualsiasi di un mouse, trackball o touchpad. Fai clic su una voce, oppure tieni premuto il tasto, muoviti sopra la voce e rilascia. Fino a otto voci, in senso orario dall'alto; ogni voce esegue un'azione qualsiasi.";
+    new_menu => "New menu", "Nuovo menù";
+    menu_name => "Name", "Nome";
+    menu_title => "Title (optional)", "Titolo (opzionale)";
+    menu_items => "Items", "Voci";
+    menu_empty => "No items yet: add one below.", "Ancora nessuna voce: aggiungine una qui sotto.";
+    menu_limit => "A menu can have at most eight items.", "Un menù può avere al massimo otto voci.";
+    add_item => "Add item", "Aggiungi voce";
+    edit_item => "Edit item", "Modifica voce";
+    new_item => "New item", "Nuova voce";
+    item_label => "Label", "Etichetta";
+    item_icon => "Icon", "Icona";
+    no_icon => "No icon", "Nessuna icona";
 
     // Settings page
     settings_title => "Settings", "Impostazioni";
