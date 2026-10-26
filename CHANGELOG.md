@@ -3,7 +3,7 @@
 All notable changes are listed here. Versions follow
 [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
+## [1.5.0] — 2026-10-26
 
 ### Added
 - **Receiver** page: a slot-by-slot view of Bolt/Unifying receivers with
