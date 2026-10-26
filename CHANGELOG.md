@@ -3,7 +3,7 @@
 All notable changes are listed here. Versions follow
 [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
+## [1.4.4] — 2026-10-26
 
 ### Fixed
 - Opening the radial menu no longer leaves the Windows busy / app-starting
