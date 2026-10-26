@@ -3,6 +3,22 @@
 All notable changes are listed here. Versions follow
 [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Added
+- **Receiver** page: a slot-by-slot view of Bolt/Unifying receivers with
+  pair, unpair, rescan and per-device status.
+- **Advanced** page (opt-in, read-only): feature list from the device,
+  a `logirevctl scan --hidden` explorer for hidden features, a JSON
+  diagnostics snapshot and OnboardProfiles (`0x8100`) capability detection.
+  Writes and raw arbitrary memory access are intentionally not exposed.
+
+### Changed
+- The settings window uses a compact **top navigation** instead of the left
+  sidebar, with a `Ctrl+K` command palette (pages and connected devices).
+- Devices and receiver slots are compact rows instead of large cards;
+  tighter spacing, smaller headings.
+
 ## [1.4.4] — 2026-10-26
 
 ### Fixed

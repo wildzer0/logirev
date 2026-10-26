@@ -98,10 +98,10 @@ pub fn install(ctx: &egui::Context) {
         v.widgets.active.bg_fill = ACCENT;
         ctx.set_visuals_of(theme, v);
         ctx.style_mut_of(theme, |s| {
-            s.spacing.item_spacing = egui::vec2(10.0, 10.0);
-            s.spacing.button_padding = egui::vec2(12.0, 6.0);
-            s.spacing.interact_size.y = 30.0;
-            s.spacing.slider_width = 260.0;
+            s.spacing.item_spacing = egui::vec2(8.0, 8.0);
+            s.spacing.button_padding = egui::vec2(10.0, 5.0);
+            s.spacing.interact_size.y = 28.0;
+            s.spacing.slider_width = 240.0;
             use egui::{FontId, TextStyle};
             s.text_styles
                 .insert(TextStyle::Heading, FontId::proportional(24.0));

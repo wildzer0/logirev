@@ -66,10 +66,15 @@ macro_rules! texts {
 texts! {
     // Navigation
     nav_devices => "Devices", "Dispositivi";
+    nav_receiver => "Receiver", "Ricevitore";
     nav_menus => "Radial menus", "Menù radiali";
     nav_macros => "Macros", "Macro";
+    nav_advanced => "Advanced", "Avanzate";
     nav_settings => "Settings", "Impostazioni";
     nav_about => "About", "Informazioni";
+    search => "Search", "Cerca";
+    search_hint => "Search pages and devices…", "Cerca pagine e periferiche…";
+    search_no_results => "Nothing found.", "Nessun risultato.";
 
     // Service state
     service_running => "Service running", "Servizio attivo";
@@ -384,6 +389,49 @@ texts! {
     item_label => "Label", "Etichetta";
     item_icon => "Icon", "Icona";
     no_icon => "No icon", "Nessuna icona";
+
+    // Receiver page
+    receiver_title => "Receiver", "Ricevitore";
+    receiver_hint => "Manage the receiver slots: pair a device, open it, or remove a pairing.",
+        "Gestisci gli slot del ricevitore: associa una periferica, aprila o rimuovi un'associazione.";
+    receiver_slots => "Slots", "Slot";
+    receiver_free => "Free slot", "Slot libero";
+    rescan => "Scan again", "Riscansiona";
+    open => "Open", "Apri";
+
+    // Advanced page
+    advanced_title => "Advanced", "Avanzate";
+    advanced_hint => "Direct HID++ inspection, diagnostics and device capabilities. Everything here is opt-in.",
+        "Ispezione HID++ diretta, diagnostica e capacità della periferica. Tutto qui è opzionale.";
+    advanced_warning_title => "Advanced tools are experimental", "Gli strumenti avanzati sono sperimentali";
+    advanced_warning => "These tools talk to the device directly. They can reveal hidden settings and, if used to write, can change or disconnect it. This version only reads; hidden-feature discovery briefly enables EnableHiddenFeatures (0x1E00) and turns it off again. Do not use it while another Logitech app is open.",
+        "Questi strumenti parlano direttamente con la periferica. Possono rivelare impostazioni nascoste e, se usati in scrittura, modificarle o scollegarla. Questa versione si limita a leggere; la scoperta delle funzioni nascoste abilita per un attimo EnableHiddenFeatures (0x1E00) e lo richiude. Non usarlo mentre un'altra app Logitech è aperta.";
+    advanced_enable => "I understand, enable", "Ho capito, abilita";
+    advanced_lock => "Lock again", "Blocca di nuovo";
+    advanced_readonly => "Read-only mode: logirev will not write to the device from this page.",
+        "Modalità sola lettura: logirev non scriverà sulla periferica da questa pagina.";
+    advanced_features => "Features", "Funzioni";
+    advanced_diagnostics => "Diagnostics", "Diagnostica";
+    advanced_onboard => "Onboard", "Onboard";
+    advanced_device => "Device", "Periferica";
+    advanced_no_device => "No connected device to inspect.", "Nessuna periferica connessa da ispezionare.";
+    advanced_no_tech => "No feature data yet. Enable Developer mode in Settings to collect feature information.",
+        "Nessun dato sulle funzioni. Attiva la modalità sviluppatore nelle Impostazioni per raccogliere le informazioni.";
+    advanced_scan => "Scan hidden features", "Scansiona funzioni nascoste";
+    advanced_scanning => "Scanning…", "Scansione…";
+    advanced_scan_hint => "Runs logirevctl scan --hidden in the background. It lists identity, firmware, all features and the hidden feature set; it never writes.",
+        "Esegue logirevctl scan --hidden in background. Elenca identità, firmware, tutte le funzioni e quelle nascoste; non scrive nulla.";
+    advanced_no_scan => "No scan yet.", "Nessuna scansione.";
+    advanced_scan_failed => "Scan failed: {}", "Scansione non riuscita: {}";
+    advanced_copy => "Copy", "Copia";
+    advanced_copied => "Copied", "Copiato";
+    advanced_snapshot => "Device snapshot", "Snapshot della periferica";
+    advanced_snapshot_hint => "Read-only JSON of the current state: paste it into a support report.",
+        "JSON in sola lettura dello stato attuale: incollalo in una segnalazione.";
+    advanced_onboard_missing => "This device does not expose OnboardProfiles (0x8100), so there is no profile memory to back up.",
+        "Questa periferica non espone OnboardProfiles (0x8100): non c'è memoria profili da salvare.";
+    advanced_onboard_present => "OnboardProfiles (0x8100) is present. This version can inspect it but does not write profile memory; use the feature scan for its index and version.",
+        "OnboardProfiles (0x8100) è presente. Questa versione può ispezionarla ma non scrive la memoria profili; usa la scansione per indice e versione.";
 
     // Settings page
     settings_title => "Settings", "Impostazioni";

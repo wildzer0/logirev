@@ -28,14 +28,13 @@ use crate::config::{
 };
 use crate::hidpp::features::{feature_name, parse_control, DeviceKind, DISABLE_KEY_NAMES};
 use crate::hidpp::frame::RECEIVER_INDEX;
+use crate::hidpp::receiver::MAX_SLOTS;
 use crate::hidpp::traffic::TrafficEntry;
 use crate::input::keys::MouseButton;
 use crate::ipc::{Client, ToService};
 use crate::status::{DeviceStatus, LinkStatus, Snapshot};
 use crate::update::{self, Release};
 
-/// Narrowest device card; the grid uses as many columns as fit.
-const CARD_MIN_WIDTH: f32 = 250.0;
 /// How long the "settings applied" message stays on screen.
 const TOAST_TIME: Duration = Duration::from_millis(2500);
 /// Wait after the last edit before saving.
@@ -47,17 +46,20 @@ const RECONNECT_EVERY: Duration = Duration::from_secs(2);
 enum Page {
     Devices,
     Device { link: String, slot: u8 },
+    Receiver,
     Menus,
     Macros,
+    Advanced,
     Settings,
     About,
 }
 
-/// What the user did with a device card.
-enum CardAction {
-    None,
-    Open,
-    Unpair,
+/// Sections of the advanced page (only after the user unlocks it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AdvancedTab {
+    Features,
+    Diagnostics,
+    Onboard,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -145,6 +147,19 @@ pub struct SettingsApp {
     wheel_drag: Option<(String, usize)>,
     /// The menu whose details are open in the Radial menus page.
     open_menu: Option<String>,
+    /// The user accepted the warning about the advanced HID++ tools.
+    advanced_unlocked: bool,
+    /// Warning dialog before unlocking the advanced tools.
+    advanced_confirm: bool,
+    advanced_tab: AdvancedTab,
+    advanced_device: Option<(String, u8)>,
+    advanced_scanning: bool,
+    advanced_scan: Arc<Mutex<Option<Result<String, String>>>>,
+    advanced_output: Option<Result<String, String>>,
+    /// Command palette (Ctrl+K).
+    palette_open: bool,
+    palette_query: String,
+    palette_focus: bool,
     new_program: String,
     running_programs: Vec<String>,
     logo: Option<TextureHandle>,
@@ -205,6 +220,16 @@ impl SettingsApp {
             previews: BTreeMap::new(),
             wheel_drag: None,
             open_menu: None,
+            advanced_unlocked: false,
+            advanced_confirm: false,
+            advanced_tab: AdvancedTab::Features,
+            advanced_device: None,
+            advanced_scanning: false,
+            advanced_scan: Arc::new(Mutex::new(None)),
+            advanced_output: None,
+            palette_open: false,
+            palette_query: String::new(),
+            palette_focus: false,
             new_program: String::new(),
             running_programs: Vec::new(),
             logo: None,
@@ -226,8 +251,10 @@ impl SettingsApp {
                         slot: 2,
                     }
                 }
+                Ok("receiver") => Page::Receiver,
                 Ok("menus") => Page::Menus,
                 Ok("macros") => Page::Macros,
+                Ok("advanced") => Page::Advanced,
                 Ok("settings") => Page::Settings,
                 Ok("about") => Page::About,
                 _ => Page::Devices,
@@ -563,69 +590,158 @@ impl SettingsApp {
     // Layout
     // ------------------------------------------------------------------
 
-    fn sidebar(&mut self, ui: &mut Ui) {
+    fn top_bar(&mut self, ui: &mut Ui) {
         let t = self.t;
         let pal = palette(ui.visuals().dark_mode);
-        ui.add_space(6.0);
         ui.horizontal(|ui| {
             if let Some(logo) = &self.logo {
-                ui.add(egui::Image::new(logo).fit_to_exact_size(egui::vec2(36.0, 36.0)));
+                ui.add(egui::Image::new(logo).fit_to_exact_size(egui::vec2(26.0, 26.0)));
             }
-            ui.vertical(|ui| {
-                ui.label(RichText::new("logirev").size(20.0).strong());
-                ui.label(
-                    RichText::new(env!("CARGO_PKG_VERSION"))
-                        .small()
-                        .color(pal.muted),
-                );
-            });
-        });
-        ui.add_space(18.0);
+            ui.label(RichText::new("logirev").size(17.0).strong());
+            ui.label(
+                RichText::new(env!("CARGO_PKG_VERSION"))
+                    .small()
+                    .color(pal.muted),
+            );
+            ui.add_space(16.0);
 
-        let device_page = matches!(self.page, Page::Device { .. });
-        for (page, ic, label) in [
-            (Page::Devices, icon::MOUSE, t.nav_devices),
-            (Page::Menus, icon::HAND_POINTING, t.nav_menus),
-            (Page::Macros, icon::MAGIC_WAND, t.nav_macros),
-            (Page::Settings, icon::GEAR, t.nav_settings),
-            (Page::About, icon::INFO, t.nav_about),
-        ] {
-            let selected = self.page == page || (device_page && page == Page::Devices);
-            let text = RichText::new(format!("{ic}   {label}")).size(16.0);
-            let button = egui::Button::selectable(selected, text)
-                .min_size(egui::vec2(ui.available_width(), 40.0));
-            if ui.add(button).clicked() {
-                self.page = page;
-            }
-        }
-
-        ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
-            ui.add_space(4.0);
-            if self.connected() {
-                ui.label(
-                    RichText::new(format!("{} {}", icon::CHECK_CIRCLE, t.service_running))
-                        .color(GOOD)
-                        .small(),
-                );
-            } else {
+            let device_page = matches!(self.page, Page::Device { .. });
+            for (page, ic, label) in [
+                (Page::Devices, icon::MOUSE, t.nav_devices),
+                (Page::Receiver, icon::BROADCAST, t.nav_receiver),
+                (Page::Menus, icon::HAND_POINTING, t.nav_menus),
+                (Page::Macros, icon::MAGIC_WAND, t.nav_macros),
+                (Page::Advanced, icon::CODE, t.nav_advanced),
+            ] {
+                let selected = self.page == page || (device_page && page == Page::Devices);
                 if ui
-                    .button(format!("{} {}", icon::POWER, t.service_start))
+                    .selectable_label(selected, RichText::new(format!("{ic}  {label}")).size(14.0))
                     .clicked()
                 {
-                    start_service(
-                        &self.exe,
-                        self.custom_config.then_some(self.config_path.as_path()),
-                        false,
-                    );
-                    self.last_attempt = None;
+                    self.page = page;
                 }
-                ui.label(
-                    RichText::new(format!("{} {}", icon::X_CIRCLE, t.service_stopped))
-                        .color(BAD)
-                        .small(),
-                );
+            }
+
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui.button(icon::INFO).on_hover_text(t.nav_about).clicked() {
+                    self.page = Page::About;
+                }
+                if ui
+                    .button(icon::GEAR)
+                    .on_hover_text(t.nav_settings)
+                    .clicked()
+                {
+                    self.page = Page::Settings;
+                }
+                if ui
+                    .add(egui::Button::new(format!("{}  {}", icon::ZOOM_IN, t.search)).frame(false))
+                    .clicked()
+                {
+                    self.palette_open = true;
+                    self.palette_focus = true;
+                }
+                if self.connected() {
+                    ui.label(RichText::new("●").color(GOOD).size(10.0))
+                        .on_hover_text(t.service_running);
+                } else {
+                    if ui
+                        .button(format!("{} {}", icon::POWER, t.service_start))
+                        .clicked()
+                    {
+                        start_service(
+                            &self.exe,
+                            self.custom_config.then_some(self.config_path.as_path()),
+                            false,
+                        );
+                        self.last_attempt = None;
+                    }
+                    ui.label(RichText::new("●").color(BAD).size(10.0))
+                        .on_hover_text(t.service_stopped);
+                }
+            });
+        });
+    }
+
+    /// Ctrl+K: jump to a page or a connected device.
+    fn command_palette(&mut self, ctx: &egui::Context) {
+        if !self.palette_open {
+            return;
+        }
+        let t = self.t;
+        let mut entries: Vec<(Page, &'static str, String)> = vec![
+            (Page::Devices, icon::MOUSE, t.nav_devices.to_owned()),
+            (Page::Receiver, icon::BROADCAST, t.nav_receiver.to_owned()),
+            (Page::Menus, icon::HAND_POINTING, t.nav_menus.to_owned()),
+            (Page::Macros, icon::MAGIC_WAND, t.nav_macros.to_owned()),
+            (Page::Advanced, icon::CODE, t.nav_advanced.to_owned()),
+            (Page::Settings, icon::GEAR, t.nav_settings.to_owned()),
+            (Page::About, icon::INFO, t.nav_about.to_owned()),
+        ];
+        for link in &self.snapshot.links {
+            for d in &link.devices {
+                entries.push((
+                    Page::Device {
+                        link: link.key.clone(),
+                        slot: d.slot,
+                    },
+                    style::kind_icon(&d.kind),
+                    format!("{}  ·  {}", d.name, link.name),
+                ));
+            }
+        }
+        let query = self.palette_query.trim().to_lowercase();
+        let filtered: Vec<(Page, &'static str, String)> = entries
+            .into_iter()
+            .filter(|(_, _, label)| query.is_empty() || label.to_lowercase().contains(&query))
+            .collect();
+        let mut chosen: Option<Page> = None;
+        let mut close = false;
+        egui::Modal::new(egui::Id::NULL.with("logirev-palette")).show(ctx, |ui| {
+            ui.set_width(520.0);
+            ui.label(RichText::new(t.search).strong());
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut self.palette_query)
+                    .hint_text(t.search_hint)
+                    .desired_width(f32::INFINITY),
+            );
+            if self.palette_focus {
+                response.request_focus();
+                self.palette_focus = false;
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                close = true;
+            }
+            ui.add_space(6.0);
+            ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+                for (page, ic, label) in &filtered {
+                    if ui
+                        .selectable_label(false, format!("{ic}  {label}"))
+                        .clicked()
+                    {
+                        chosen = Some(page.clone());
+                    }
+                }
+                if filtered.is_empty() {
+                    ui.label(
+                        RichText::new(t.search_no_results)
+                            .color(palette(ui.visuals().dark_mode).muted),
+                    );
+                }
+            });
+            if chosen.is_none() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                if let Some((page, _, _)) = filtered.first() {
+                    chosen = Some(page.clone());
+                }
             }
         });
+        if let Some(page) = chosen {
+            self.page = page;
+            close = true;
+        }
+        if close {
+            self.palette_open = false;
+            self.palette_query.clear();
+        }
     }
 
     /// A floating message at the bottom of the window while changes are
@@ -682,8 +798,10 @@ impl SettingsApp {
         match self.page.clone() {
             Page::Devices => self.devices_page(ui),
             Page::Device { link, slot } => self.device_page(ui, &link, slot),
+            Page::Receiver => self.receiver_page(ui),
             Page::Menus => self.menus_page(ui),
             Page::Macros => self.macros_page(ui),
+            Page::Advanced => self.advanced_page(ui),
             Page::Settings => self.settings_page(ui),
             Page::About => self.about_page(ui),
         }
@@ -696,7 +814,7 @@ impl SettingsApp {
     fn devices_page(&mut self, ui: &mut Ui) {
         let t = self.t;
         let pal = palette(ui.visuals().dark_mode);
-        ui.label(RichText::new(t.devices_title).size(28.0).strong());
+        ui.label(RichText::new(t.devices_title).size(24.0).strong());
         ui.label(RichText::new(t.devices_subtitle).color(pal.muted));
         ui.add_space(12.0);
 
@@ -792,141 +910,625 @@ impl SettingsApp {
             if link.devices.is_empty() {
                 ui.label(t.no_devices);
             }
-            // Responsive grid: as many columns as fit, cards share the width.
-            let gap = 14.0;
-            let avail = ui.available_width();
-            let columns = (((avail + gap) / (CARD_MIN_WIDTH + gap)).floor() as usize).clamp(1, 4);
-            let card_width = (avail - gap * (columns as f32 - 1.0)) / columns as f32;
-            for row in link.devices.chunks(columns) {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = egui::vec2(gap, gap);
-                    for d in row {
-                        match self.device_card(ui, link, d, card_width) {
-                            CardAction::Open => {
-                                self.page = Page::Device {
-                                    link: link.key.clone(),
-                                    slot: d.slot,
-                                };
-                                self.tab = Tab::Buttons;
-                            }
-                            CardAction::Unpair => {
-                                self.confirm_unpair =
-                                    Some((link.key.clone(), d.slot, d.name.clone()));
-                            }
-                            CardAction::None => {}
-                        }
-                    }
-                });
-                ui.add_space(gap);
+            for d in &link.devices {
+                self.receiver_slot_row(ui, link, d.slot, Some(d));
             }
-            ui.add_space(16.0);
+            ui.add_space(12.0);
         }
     }
 
     /// One device card: a click opens the device (if connected); the
     /// right-click menu can remove the pairing.
-    fn device_card(
-        &self,
-        ui: &mut Ui,
-        link: &LinkStatus,
-        d: &DeviceStatus,
-        width: f32,
-    ) -> CardAction {
-        let t = self.t;
-        let dark = ui.visuals().dark_mode;
-        let pal = palette(dark);
-        let id = ui.scope_id().with(("card", &d.name, d.slot));
-        let hovered = d.online && ui.ctx().data(|m| m.get_temp::<bool>(id)).unwrap_or(false);
-        let frame = Frame::new()
-            .fill(if hovered { pal.card_hover } else { pal.card })
-            .stroke(Stroke::new(1.0, if hovered { ACCENT } else { pal.border }))
-            .corner_radius(CornerRadius::same(16))
-            .inner_margin(Margin::same(18));
-        let inner = frame.show(ui, |ui| {
-            // The frame adds its margin and border around the content.
-            ui.set_width(width - 38.0);
-            ui.set_min_height(132.0);
-            // The card sits in a wrapping row: lay its content out vertically.
-            ui.vertical(|ui| {
-                let faded = |c: Color32| if d.online { c } else { c.gamma_multiply(0.45) };
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(style::kind_icon(&d.kind))
-                            .size(38.0)
-                            .color(faded(ACCENT)),
-                    );
-                    ui.vertical(|ui| {
-                        ui.label(
-                            RichText::new(&d.name)
-                                .size(17.0)
-                                .strong()
-                                .color(faded(ui.visuals().text_color())),
-                        );
-                        let place = if d.slot == RECEIVER_INDEX {
-                            t.direct.to_owned()
-                        } else {
-                            fill(t.slot, &[&d.slot.to_string()])
-                        };
-                        ui.label(RichText::new(place).small().color(pal.muted));
-                    });
-                });
-                ui.add_space(6.0);
-                if d.online {
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new(format!("{} {}", icon::CHECK_CIRCLE, t.connected))
-                                .color(GOOD),
-                        );
-                        if let Some(b) = &d.battery {
-                            let (ic, color) = style::battery_icon(b);
-                            ui.label(
-                                RichText::new(format!("{ic} {}", b.split(' ').next().unwrap_or(b)))
-                                    .color(color)
-                                    .size(16.0),
-                            );
-                        }
-                    });
-                    if d.remapped > 0 {
-                        ui.label(
-                            RichText::new(fill(t.buttons_remapped, &[&d.remapped.to_string()]))
-                                .small()
-                                .color(pal.muted),
-                        );
-                    }
-                } else {
-                    ui.label(RichText::new(t.asleep).color(pal.muted));
-                    ui.label(RichText::new(t.asleep_hint).small().color(pal.muted));
-                }
-            });
-        });
-        let resp = ui.interact(inner.response.rect, id, Sense::click());
-        ui.ctx().data_mut(|m| m.insert_temp(id, resp.hovered()));
-        if resp.hovered() && d.online {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-        }
-        let mut action = if resp.clicked() && d.online {
-            CardAction::Open
-        } else {
-            CardAction::None
-        };
-        if link.can_pair && d.slot != RECEIVER_INDEX {
-            resp.context_menu(|ui| {
-                if ui
-                    .button(format!("{} {}", icon::TRASH, self.t.unpair))
-                    .clicked()
-                {
-                    action = CardAction::Unpair;
-                    ui.close();
-                }
-            });
-        }
-        action
-    }
-
     fn find_device(&self, link: &str, slot: u8) -> Option<(LinkStatus, DeviceStatus)> {
         let l = self.snapshot.links.iter().find(|l| l.key == link)?;
         let d = l.devices.iter().find(|d| d.slot == slot)?;
         Some((l.clone(), d.clone()))
+    }
+
+    fn receiver_page(&mut self, ui: &mut Ui) {
+        let t = self.t;
+        let pal = palette(ui.visuals().dark_mode);
+        ui.label(RichText::new(t.receiver_title).size(24.0).strong());
+        ui.label(RichText::new(t.receiver_hint).color(pal.muted));
+        ui.add_space(8.0);
+
+        if !self.connected() {
+            empty_state(ui, icon::POWER, t.service_stopped, t.service_stopped_hint);
+            return;
+        }
+        if self.snapshot.links.is_empty() {
+            empty_state(ui, icon::USB, t.no_receiver_title, t.no_receiver_hint);
+            return;
+        }
+        let links = self.snapshot.links.clone();
+        for link in &links {
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(format!(
+                        "{}  {}",
+                        if link.is_receiver {
+                            icon::BROADCAST
+                        } else {
+                            icon::BLUETOOTH
+                        },
+                        link.name
+                    ))
+                    .size(17.0)
+                    .strong(),
+                );
+                if link.is_receiver {
+                    ui.label(
+                        RichText::new(format!(
+                            "{}/{} {}",
+                            link.devices
+                                .iter()
+                                .filter(|d| d.slot != RECEIVER_INDEX)
+                                .count(),
+                            MAX_SLOTS,
+                            t.receiver_slots
+                        ))
+                        .small()
+                        .color(pal.muted),
+                    );
+                }
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if link.can_pair
+                        && link.pairing.is_none()
+                        && ui
+                            .button(format!("{} {}", icon::PLUS, t.pair_new))
+                            .clicked()
+                    {
+                        self.send(ToService::StartPairing {
+                            link: link.key.clone(),
+                        });
+                    }
+                    if ui
+                        .add(
+                            egui::Button::new(format!("{} {}", icon::ARROWS_CLOCKWISE, t.rescan))
+                                .frame(false),
+                        )
+                        .clicked()
+                    {
+                        self.send(ToService::Rescan);
+                    }
+                });
+            });
+            if let Some(pairing) = &link.pairing {
+                ui.label(
+                    RichText::new(format!("{}  {}", icon::BROADCAST, t.pairing_in_progress))
+                        .color(ACCENT),
+                );
+                let _ = pairing;
+            }
+            ui.add_space(2.0);
+            ui.separator();
+            if link.is_receiver {
+                for slot in 1..=MAX_SLOTS {
+                    let d = link.devices.iter().find(|d| d.slot == slot);
+                    self.receiver_slot_row(ui, link, slot, d);
+                }
+            }
+            for d in link.devices.iter().filter(|d| d.slot == RECEIVER_INDEX) {
+                self.receiver_slot_row(ui, link, RECEIVER_INDEX, Some(d));
+            }
+            ui.add_space(8.0);
+        }
+    }
+
+    fn receiver_slot_row(
+        &mut self,
+        ui: &mut Ui,
+        link: &LinkStatus,
+        slot: u8,
+        d: Option<&DeviceStatus>,
+    ) {
+        let t = self.t;
+        let pal = palette(ui.visuals().dark_mode);
+        ui.horizontal(|ui| {
+            let slot_text = if slot == RECEIVER_INDEX {
+                t.direct.to_owned()
+            } else {
+                fill(t.slot, &[&slot.to_string()])
+            };
+            ui.label(
+                RichText::new(slot_text)
+                    .monospace()
+                    .small()
+                    .color(pal.muted),
+            );
+            match d {
+                Some(d) => {
+                    ui.label(
+                        RichText::new(style::kind_icon(&d.kind))
+                            .size(18.0)
+                            .color(if d.online { ACCENT } else { pal.muted }),
+                    );
+                    ui.vertical(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(&d.name).strong());
+                            if !d.online {
+                                ui.label(RichText::new(t.asleep).small().color(pal.muted))
+                                    .on_hover_text(t.asleep_hint);
+                            }
+                        });
+                        let mut details = Vec::new();
+                        if let Some(b) = &d.battery {
+                            details.push(b.clone());
+                        }
+                        if let Some(p) = &d.profile {
+                            details.push(p.clone());
+                        }
+                        if d.remapped > 0 {
+                            details.push(fill(t.buttons_remapped, &[&d.remapped.to_string()]));
+                        }
+                        if !details.is_empty() {
+                            ui.label(
+                                RichText::new(details.join("  ·  "))
+                                    .small()
+                                    .color(pal.muted),
+                            );
+                        }
+                    });
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if link.can_pair
+                            && slot != RECEIVER_INDEX
+                            && ui
+                                .add(
+                                    egui::Button::new(
+                                        RichText::new(icon::TRASH).size(14.0).color(pal.muted),
+                                    )
+                                    .frame(false),
+                                )
+                                .on_hover_text(t.unpair)
+                                .clicked()
+                        {
+                            self.confirm_unpair = Some((link.key.clone(), d.slot, d.name.clone()));
+                        }
+                        if d.online && ui.button(t.open).clicked() {
+                            self.page = Page::Device {
+                                link: link.key.clone(),
+                                slot: d.slot,
+                            };
+                            self.tab = Tab::Buttons;
+                        }
+                    });
+                }
+                None => {
+                    ui.label(RichText::new(t.receiver_free).color(pal.muted));
+                    if link.can_pair && link.pairing.is_none() {
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if ui.add(egui::Button::new(icon::PLUS).frame(false)).clicked() {
+                                self.send(ToService::StartPairing {
+                                    link: link.key.clone(),
+                                });
+                            }
+                        });
+                    }
+                }
+            }
+        });
+        ui.separator();
+    }
+
+    fn advanced_page(&mut self, ui: &mut Ui) {
+        let t = self.t;
+        let pal = palette(ui.visuals().dark_mode);
+        ui.label(RichText::new(t.advanced_title).size(24.0).strong());
+        ui.label(RichText::new(t.advanced_hint).color(pal.muted));
+        ui.add_space(8.0);
+
+        if !self.advanced_unlocked {
+            Frame::new()
+                .fill(WARN.gamma_multiply(0.08))
+                .stroke(Stroke::new(1.0, WARN))
+                .corner_radius(CornerRadius::same(12))
+                .inner_margin(Margin::same(18))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(icon::WARNING).size(20.0).color(WARN));
+                        ui.label(RichText::new(t.advanced_warning_title).size(16.0).strong());
+                    });
+                    ui.add_space(4.0);
+                    ui.add(egui::Label::new(t.advanced_warning).wrap());
+                    ui.add_space(8.0);
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                RichText::new(t.advanced_enable).color(Color32::WHITE),
+                            )
+                            .fill(WARN),
+                        )
+                        .clicked()
+                    {
+                        self.advanced_confirm = true;
+                    }
+                });
+            return;
+        }
+
+        if self.advanced_scanning {
+            if let Some(result) = self
+                .advanced_scan
+                .lock()
+                .ok()
+                .and_then(|mut slot| slot.take())
+            {
+                self.advanced_scanning = false;
+                self.advanced_output = Some(result);
+            } else {
+                ui.ctx().request_repaint_after(Duration::from_millis(200));
+            }
+        }
+
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(icon::LOCK).color(GOOD));
+            ui.label(RichText::new(t.advanced_readonly).small().color(pal.muted));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui.button(t.advanced_lock).clicked() {
+                    self.advanced_unlocked = false;
+                }
+            });
+        });
+        ui.add_space(6.0);
+
+        let devices: Vec<(String, u8, String)> = self
+            .snapshot
+            .links
+            .iter()
+            .flat_map(|link| {
+                link.devices.iter().filter(|d| d.online).map(|d| {
+                    (
+                        link.key.clone(),
+                        d.slot,
+                        format!("{}  ·  {}", d.name, link.name),
+                    )
+                })
+            })
+            .collect();
+        if devices.is_empty() {
+            empty_state(ui, icon::MOUSE, t.advanced_no_device, t.no_receiver_hint);
+            return;
+        }
+        let valid = self
+            .advanced_device
+            .as_ref()
+            .is_some_and(|(link, slot)| devices.iter().any(|(l, s, _)| l == link && s == slot));
+        if !valid {
+            self.advanced_device = devices.first().map(|(l, s, _)| (l.clone(), *s));
+        }
+        let selected = self.advanced_device.clone().and_then(|(link, slot)| {
+            devices
+                .iter()
+                .find(|(l, s, _)| *l == link && *s == slot)
+                .map(|(l, s, label)| (l.clone(), *s, label.clone()))
+        });
+        let selected_label = selected
+            .as_ref()
+            .map(|(_, _, label)| label.clone())
+            .unwrap_or_default();
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(t.advanced_device).small().color(pal.muted));
+            egui::ComboBox::from_id_salt("advanced-device")
+                .selected_text(selected_label)
+                .show_ui(ui, |ui| {
+                    for (link, slot, label) in &devices {
+                        let is_selected = self
+                            .advanced_device
+                            .as_ref()
+                            .is_some_and(|(l, s)| l == link && s == slot);
+                        if ui.selectable_label(is_selected, label).clicked() {
+                            self.advanced_device = Some((link.clone(), *slot));
+                        }
+                    }
+                });
+        });
+        let Some((link, slot, _)) = selected else {
+            return;
+        };
+        let Some((_, d)) = self.find_device(&link, slot) else {
+            empty_state(ui, icon::WARNING, t.asleep, t.device_gone);
+            return;
+        };
+
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            for (tab, label) in [
+                (AdvancedTab::Features, t.advanced_features),
+                (AdvancedTab::Diagnostics, t.advanced_diagnostics),
+                (AdvancedTab::Onboard, t.advanced_onboard),
+            ] {
+                if ui
+                    .selectable_label(self.advanced_tab == tab, label)
+                    .clicked()
+                {
+                    self.advanced_tab = tab;
+                }
+            }
+        });
+        ui.separator();
+        ui.add_space(6.0);
+
+        match self.advanced_tab {
+            AdvancedTab::Features => self.advanced_features_tab(ui, &d),
+            AdvancedTab::Diagnostics => self.advanced_diagnostics_tab(ui, &link, &d),
+            AdvancedTab::Onboard => self.advanced_onboard_tab(ui, &d),
+        }
+    }
+
+    fn advanced_features_tab(&mut self, ui: &mut Ui, d: &DeviceStatus) {
+        let t = self.t;
+        let pal = palette(ui.visuals().dark_mode);
+        let tech = d.details.as_ref().and_then(|x| x.tech.clone());
+        if let Some(tech) = &tech {
+            egui::Grid::new("advanced-features-grid")
+                .num_columns(5)
+                .striped(true)
+                .spacing([18.0, 5.0])
+                .show(ui, |ui| {
+                    for header in ["idx", "id", "feature", "ver", "flags"] {
+                        ui.label(RichText::new(header).small().color(pal.muted));
+                    }
+                    ui.end_row();
+                    for f in &tech.features {
+                        ui.label(RichText::new(format!("{:>3}", f.index)).monospace().small());
+                        ui.label(RichText::new(format!("{:#06x}", f.id)).monospace());
+                        ui.label(feature_name(f.id));
+                        ui.label(RichText::new(format!("v{}", f.version)).monospace().small());
+                        ui.label(
+                            RichText::new(f.flag_names().join(" "))
+                                .small()
+                                .color(pal.muted),
+                        );
+                        ui.end_row();
+                    }
+                });
+        } else {
+            ui.label(RichText::new(t.advanced_no_tech).color(pal.muted));
+        }
+        ui.add_space(10.0);
+        ui.separator();
+        ui.label(RichText::new(t.advanced_scan_hint).small().color(pal.muted));
+        let mut start = false;
+        let mut copy = false;
+        ui.horizontal(|ui| {
+            if !self.advanced_scanning && ui.button(t.advanced_scan).clicked() {
+                start = true;
+            }
+            if self.advanced_scanning {
+                ui.spinner();
+                ui.label(RichText::new(t.advanced_scanning).color(pal.muted));
+            }
+            if let Some(Ok(text)) = &self.advanced_output {
+                if ui.button(t.advanced_copy).clicked() {
+                    ui.ctx().copy_text(text.clone());
+                    copy = true;
+                }
+            }
+            if copy {
+                ui.label(RichText::new(t.advanced_copied).small().color(GOOD));
+            }
+        });
+        if start {
+            self.start_advanced_scan(ui.ctx());
+        }
+        match &self.advanced_output {
+            Some(Ok(text)) => {
+                ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
+                    ui.add(
+                        egui::TextEdit::multiline(&mut text.clone())
+                            .code_editor()
+                            .desired_width(f32::INFINITY)
+                            .interactive(false),
+                    );
+                });
+            }
+            Some(Err(e)) => {
+                ui.label(RichText::new(fill(t.advanced_scan_failed, &[e])).color(BAD));
+            }
+            None if !self.advanced_scanning => {
+                ui.label(RichText::new(t.advanced_no_scan).small().color(pal.muted));
+            }
+            None => {}
+        }
+    }
+
+    fn advanced_diagnostics_tab(&mut self, ui: &mut Ui, link: &str, d: &DeviceStatus) {
+        let t = self.t;
+        let pal = palette(ui.visuals().dark_mode);
+        let details = d.details.clone().unwrap_or_default();
+        egui::Grid::new("advanced-diagnostics-grid")
+            .num_columns(2)
+            .spacing([18.0, 6.0])
+            .show(ui, |ui| {
+                let mut row = |label: &str, value: String| {
+                    ui.label(RichText::new(label).small().color(pal.muted));
+                    ui.label(value);
+                    ui.end_row();
+                };
+                row(t.menu_name, d.name.clone());
+                row(
+                    "slot",
+                    if d.slot == RECEIVER_INDEX {
+                        t.direct.to_owned()
+                    } else {
+                        d.slot.to_string()
+                    },
+                );
+                row("kind", d.kind.clone());
+                row(
+                    "online",
+                    if d.online {
+                        t.connected.into()
+                    } else {
+                        t.asleep.into()
+                    },
+                );
+                if let Some(b) = &d.battery {
+                    row("battery", b.clone());
+                }
+                if !details.firmware.is_empty() {
+                    row(t.firmware, details.firmware.clone());
+                }
+                if let Some(dpi) = d.dpi {
+                    row("dpi", dpi.to_string());
+                }
+                if let Some(profile) = &d.profile {
+                    row("profile", profile.clone());
+                }
+                row(
+                    "features",
+                    details
+                        .tech
+                        .as_ref()
+                        .map_or("—".into(), |x| x.features.len().to_string()),
+                );
+                if let Some(hosts) = &d.hosts {
+                    row("hosts", format!("{} / {}", hosts.current + 1, hosts.count));
+                }
+                if !details.report_rates.is_empty() {
+                    row("report rates", format!("{:?} Hz", details.report_rates));
+                }
+            });
+        ui.add_space(10.0);
+        ui.separator();
+        let json = serde_json::to_string_pretty(&serde_json::json!({
+            "logirev": env!("CARGO_PKG_VERSION"),
+            "link": link,
+            "device": d,
+            "snapshot": &self.snapshot,
+        }))
+        .unwrap_or_default();
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(t.advanced_snapshot).strong());
+            if ui.button(t.advanced_copy).clicked() {
+                ui.ctx().copy_text(json.clone());
+            }
+        });
+        ui.label(
+            RichText::new(t.advanced_snapshot_hint)
+                .small()
+                .color(pal.muted),
+        );
+        ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+            ui.add(
+                egui::TextEdit::multiline(&mut json.clone())
+                    .code_editor()
+                    .desired_width(f32::INFINITY)
+                    .interactive(false),
+            );
+        });
+    }
+
+    fn advanced_onboard_tab(&mut self, ui: &mut Ui, d: &DeviceStatus) {
+        let t = self.t;
+        let pal = palette(ui.visuals().dark_mode);
+        let tech = d.details.as_ref().and_then(|x| x.tech.as_ref());
+        let onboard = tech.and_then(|x| x.features.iter().find(|f| f.id == 0x8100));
+        if let Some(f) = onboard {
+            ui.label(
+                RichText::new(format!(
+                    "{}  0x8100  v{}  index {}",
+                    icon::CPU,
+                    f.version,
+                    f.index
+                ))
+                .strong(),
+            );
+            ui.add_space(4.0);
+            ui.add(egui::Label::new(t.advanced_onboard_present).wrap());
+        } else {
+            ui.add(egui::Label::new(t.advanced_onboard_missing).wrap());
+        }
+        ui.add_space(8.0);
+        ui.label(RichText::new(t.advanced_readonly).small().color(pal.muted));
+    }
+
+    fn start_advanced_scan(&mut self, ctx: &egui::Context) {
+        if self.advanced_scanning {
+            return;
+        }
+        let exe = self.exe.with_file_name(if cfg!(windows) {
+            "logirevctl.exe"
+        } else {
+            "logirevctl"
+        });
+        if !exe.exists() {
+            self.advanced_output = Some(Err(format!("{} not found", exe.display())));
+            return;
+        }
+        self.advanced_scanning = true;
+        self.advanced_output = None;
+        let config = self.config_path.clone();
+        let result_slot = Arc::clone(&self.advanced_scan);
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let mut cmd = std::process::Command::new(&exe);
+            cmd.arg("--config").arg(&config).arg("scan").arg("--hidden");
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                cmd.creation_flags(0x0800_0000);
+            }
+            let result = match cmd.output() {
+                Ok(out) => {
+                    let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
+                    let err = String::from_utf8_lossy(&out.stderr);
+                    if !err.trim().is_empty() {
+                        text.push('\n');
+                        text.push_str(&err);
+                    }
+                    if out.status.success() {
+                        Ok(text)
+                    } else {
+                        Err(text)
+                    }
+                }
+                Err(e) => Err(format!("cannot run {}: {e}", exe.display())),
+            };
+            if let Ok(mut slot) = result_slot.lock() {
+                *slot = Some(result);
+            }
+            ctx.request_repaint();
+        });
+    }
+
+    fn advanced_warning_dialog(&mut self, ctx: &egui::Context) {
+        if !self.advanced_confirm {
+            return;
+        }
+        let t = self.t;
+        let mut answer: Option<bool> = None;
+        let modal = egui::Modal::new(egui::Id::NULL.with("logirev-advanced")).show(ctx, |ui| {
+            ui.set_width(540.0);
+            ui.label(RichText::new(t.advanced_warning_title).size(18.0).strong());
+            ui.add_space(6.0);
+            ui.add(egui::Label::new(t.advanced_warning).wrap());
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                if ui
+                    .add(
+                        egui::Button::new(RichText::new(t.advanced_enable).color(Color32::WHITE))
+                            .fill(WARN),
+                    )
+                    .clicked()
+                {
+                    answer = Some(true);
+                }
+                if ui.button(t.cancel).clicked() {
+                    answer = Some(false);
+                }
+            });
+        });
+        if modal.should_close() && answer.is_none() {
+            answer = Some(false);
+        }
+        if let Some(yes) = answer {
+            self.advanced_confirm = false;
+            if yes {
+                self.advanced_unlocked = true;
+            }
+        }
     }
 
     fn device_page(&mut self, ui: &mut Ui, link: &str, slot: u8) {
@@ -954,7 +1556,7 @@ impl SettingsApp {
                     .color(ACCENT),
             );
             ui.vertical(|ui| {
-                ui.label(RichText::new(&d.name).size(26.0).strong());
+                ui.label(RichText::new(&d.name).size(22.0).strong());
                 ui.horizontal(|ui| {
                     if let Some(b) = &d.battery {
                         let (ic, color) = style::battery_icon(b);
@@ -2035,7 +2637,7 @@ impl SettingsApp {
     fn macros_page(&mut self, ui: &mut Ui) {
         let t = self.t;
         let pal = palette(ui.visuals().dark_mode);
-        ui.label(RichText::new(t.macros_title).size(28.0).strong());
+        ui.label(RichText::new(t.macros_title).size(24.0).strong());
         ui.label(RichText::new(t.macros_hint).color(pal.muted));
         ui.add_space(8.0);
         if ui
@@ -2136,7 +2738,7 @@ impl SettingsApp {
     fn menus_page(&mut self, ui: &mut Ui) {
         let t = self.t;
         let pal = palette(ui.visuals().dark_mode);
-        ui.label(RichText::new(t.menus_title).size(28.0).strong());
+        ui.label(RichText::new(t.menus_title).size(24.0).strong());
         ui.label(RichText::new(t.menus_hint).color(pal.muted));
         ui.add_space(8.0);
         if ui
@@ -2569,7 +3171,7 @@ impl SettingsApp {
     fn settings_page(&mut self, ui: &mut Ui) {
         let t = self.t;
         let pal = palette(ui.visuals().dark_mode);
-        ui.label(RichText::new(t.settings_title).size(28.0).strong());
+        ui.label(RichText::new(t.settings_title).size(24.0).strong());
         ui.add_space(8.0);
         let before = self.raw.general.clone();
         let level_before = self.raw.logging.level.clone();
@@ -2891,7 +3493,7 @@ impl SettingsApp {
                 ui.add(egui::Image::new(logo).fit_to_exact_size(egui::vec2(110.0, 110.0)));
             }
             ui.add_space(10.0);
-            ui.label(RichText::new("logirev").size(34.0).strong());
+            ui.label(RichText::new("logirev").size(28.0).strong());
             ui.label(RichText::new(format!("v{}", env!("CARGO_PKG_VERSION"))).color(pal.muted));
             ui.add_space(14.0);
             ui.label(RichText::new(t.about_text).size(16.0));
@@ -2919,30 +3521,36 @@ impl eframe::App for SettingsApp {
             let image = egui::ColorImage::from_rgba_unmultiplied([128, 128], &rgba);
             self.logo = Some(ctx.load_texture("logo", image, egui::TextureOptions::LINEAR));
         }
+        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::K)) {
+            self.palette_open = !self.palette_open;
+            self.palette_focus = self.palette_open;
+        }
         let pal = palette(ui.visuals().dark_mode);
-        egui::Panel::left("nav")
-            .exact_size(220.0)
+        egui::Panel::top("nav")
+            .exact_size(56.0)
             .resizable(false)
             .frame(
                 Frame::new()
                     .fill(pal.sidebar)
-                    .inner_margin(Margin::same(16)),
+                    .inner_margin(Margin::symmetric(18, 8)),
             )
-            .show(ui, |ui| self.sidebar(ui));
+            .show(ui, |ui| self.top_bar(ui));
         egui::CentralPanel::default()
             .frame(
                 Frame::new()
                     .fill(ui.visuals().panel_fill)
-                    .inner_margin(Margin::symmetric(28, 20)),
+                    .inner_margin(Margin::symmetric(28, 22)),
             )
             .show(ui, |ui| {
                 ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        ui.set_max_width(ui.available_width().min(900.0));
+                        ui.set_max_width(ui.available_width().min(1100.0));
                         self.content(ui);
                     });
             });
+        self.command_palette(&ctx);
+        self.advanced_warning_dialog(&ctx);
         self.editor_dialog(&ctx);
         self.item_editor_dialog(&ctx);
         self.pairing_dialog(&ctx);
@@ -3158,11 +3766,11 @@ fn section(
     Frame::new()
         .fill(fill_color)
         .stroke(Stroke::new(1.0, border))
-        .corner_radius(CornerRadius::same(14))
-        .inner_margin(Margin::same(18))
+        .corner_radius(CornerRadius::same(12))
+        .inner_margin(Margin::same(16))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(RichText::new(title).size(17.0).strong());
+            ui.label(RichText::new(title).size(16.0).strong());
             ui.add_space(4.0);
             add(ui);
         });
@@ -3179,14 +3787,14 @@ fn card_row(
     let resp = Frame::new()
         .fill(fill_color)
         .stroke(Stroke::new(1.0, border))
-        .corner_radius(CornerRadius::same(12))
-        .inner_margin(Margin::symmetric(16, 10))
+        .corner_radius(CornerRadius::same(10))
+        .inner_margin(Margin::symmetric(14, 8))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(add);
         })
         .response;
-    ui.add_space(6.0);
+    ui.add_space(4.0);
     resp
 }
 

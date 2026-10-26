@@ -97,6 +97,18 @@ double-clicking `logirev.exe` again).
 - **Settings** — language, light or dark look, *Start with Windows*,
   battery warning, **updates**.
 
+**Receiver** (*Receiver*): a slot-by-slot view of each Bolt/Unifying
+receiver — pair, remove a pairing, rescan, and see which device is in each
+slot. Slot numbers and sleeping devices are visible without opening the
+device page.
+
+**Advanced** (*Advanced*): experimental, opt-in and **read-only**. It shows
+the HID++ feature table, can run `logirevctl scan --hidden` to reveal hidden
+features, exports a JSON diagnostics snapshot and reports whether the device
+has OnboardProfiles (`0x8100`). Raw writes and arbitrary memory access are
+not offered: a wrong write can brick a device and HID++ has no generic
+memory-read command.
+
 **Updates:** logirev looks for a new version once a day. When there is one,
 a notification appears and the app shows *Version X is available* with an
 **Update now** button: logirev downloads the new version from this

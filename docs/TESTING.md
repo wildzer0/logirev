@@ -215,3 +215,13 @@ latest published release (e.g. set `version = "0.9.0"` locally).
 | Q15 | Add items up to the limit | At ten the *Add item* button is replaced by "A menu can have at most ten items"; the configuration refuses an eleventh item too. |
 | Q16 | Add the *Lock the PC* preset to a menu (or a button) and choose it | Windows locks at once; on Linux the session manager or screen locker locks. Unlike the old `Win+L` simulation, it works from a simulated action. |
 | Q17 | Open the menu and click on another window, on the desktop, or on the transparent shadow around the wheel | The menu closes without choosing anything; the click still reaches the window under the pointer. |
+
+## R. Receiver and Advanced pages
+
+| # | Do | Expect |
+|---|---|---|
+| R1 | Top navigation → *Receiver*, with a Bolt/Unifying receiver and a paired device | Every slot 1–6 is visible, empty slots say "Free slot", connected/sleeping devices show name, status and battery. Pair, Remove pairing and Scan again work; removing asks for confirmation. |
+| R2 | Top navigation → *Advanced* before unlocking | The warning explains that the tools are experimental; nothing runs until **I understand, enable** is clicked, and the dialog must be confirmed. |
+| R3 | Unlock *Advanced*, select an online device, open *Features* → *Scan hidden features* | `logirevctl scan --hidden` output appears in the page with identity, firmware, features and hidden features; the log/scan does not change settings. Try *Diagnostics* → copy the JSON and *Onboard*; a device without `0x8100` explains that there is no profile memory. |
+| R4 | Press `Ctrl+K`, type a page or device name, press Enter | The command palette opens from anywhere, filters the list, and jumps to the selected page/device. |
+| R5 | Resize the window and use the top navigation | There is no left sidebar; the top bar stays compact, page content is capped in width, and device/receiver entries are rows rather than cards. |
