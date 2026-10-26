@@ -3,6 +3,13 @@
 All notable changes are listed here. Versions follow
 [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Fixed
+- Opening the radial menu no longer leaves the Windows busy / app-starting
+  cursor on screen: the overlay now forces the normal arrow cursor when it
+  appears and handles `WM_SETCURSOR`.
+
 ## [1.4.3] — 2026-10-26
 
 ### Changed

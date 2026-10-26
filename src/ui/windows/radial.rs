@@ -39,11 +39,11 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetCursorPos, GetMessageW, KillTimer,
-    LoadCursorW, PostQuitMessage, RegisterClassW, SetTimer, ShowWindow, TranslateMessage,
-    UpdateLayeredWindow, IDC_ARROW, MA_NOACTIVATE, MSG, SW_HIDE, SW_SHOWNOACTIVATE, ULW_ALPHA,
-    WM_CAPTURECHANGED, WM_DESTROY, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE,
-    WM_RBUTTONDOWN, WM_TIMER, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-    WS_EX_TOPMOST, WS_POPUP,
+    LoadCursorW, PostQuitMessage, RegisterClassW, SetCursor, SetTimer, ShowWindow,
+    TranslateMessage, UpdateLayeredWindow, IDC_ARROW, MA_NOACTIVATE, MSG, SW_HIDE,
+    SW_SHOWNOACTIVATE, ULW_ALPHA, WM_CAPTURECHANGED, WM_DESTROY, WM_LBUTTONDOWN, WM_LBUTTONUP,
+    WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_RBUTTONDOWN, WM_SETCURSOR, WM_TIMER, WNDCLASSW,
+    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
 use super::util::wide;
@@ -388,6 +388,9 @@ fn show_at(hwnd: HWND, menu: &RadialMenu, tx: Option<&Sender<Event>>, demo: bool
     unsafe {
         ShowWindow(hwnd, SW_SHOWNOACTIVATE);
         SetCapture(hwnd);
+        // Do not leave the system's busy / app-starting cursor behind while
+        // the overlay is being prepared.
+        SetCursor(LoadCursorW(std::ptr::null_mut(), IDC_ARROW));
         SetTimer(hwnd, TIMER_FADE, 15, None);
         SetTimer(hwnd, TIMER_TIMEOUT, VISIBLE_MS, None);
         // Fallback for clicks outside the window: Windows does not always
@@ -790,6 +793,11 @@ unsafe extern "system" fn window_proc(
 ) -> LRESULT {
     match msg {
         WM_MOUSEACTIVATE => MA_NOACTIVATE as LRESULT,
+        WM_SETCURSOR => {
+            // SAFETY: the standard arrow cursor; we do not own the handle.
+            unsafe { SetCursor(LoadCursorW(std::ptr::null_mut(), IDC_ARROW)) };
+            1
+        }
         WM_MOUSEMOVE => {
             let hovered = hit();
             let changed = OPEN.with(|state| {
