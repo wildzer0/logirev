@@ -311,11 +311,13 @@ precision = { action = "radial", menu = "work" }
   a receiver: `logirev.exe --radial-demo`.
 - A menu can have no items while you are editing it, but a `radial` action
   pointing at an empty menu does nothing.
-- The *Radial menus* page shows the **wheel itself**: click a sector to edit
-  its label, icon and action; drag a sector onto another to move it. The
-  preview uses the same painter as the real menu, so what you see is what
-  opens under the pointer. The page also shows the item count (`n/10`); ten
-  is the maximum, because more would make the labels unreadable.
+- The *Radial menus* page lists the menus **collapsed** (name, title and
+  item count); click a header to open one at a time and see its details
+  without scrolling through all the others. The wheel is the editor: click
+  a sector to edit its label, icon and action; drag a sector onto another
+  to move it. It uses the same painter as the real menu, so what you see is
+  what opens under the pointer. The page also shows the item count (`n/10`);
+  ten is the maximum, because more would make the labels unreadable.
 
 ### Key names
 

@@ -173,7 +173,8 @@ masks) and is unit-tested on every platform; `src/ui/windows/radial.rs`
 creates the layered window once and shows it under the pointer with
 `UpdateLayeredWindow`. The settings window feeds the same painter into an
 editable wheel (`menu_editor` in `gui/app.rs`): clicking a sector opens its
-editor and dragging one onto another moves it. The window uses `WS_EX_NOACTIVATE` + `SetCapture`, so
+editor and dragging one onto another moves it. The menus page shows one
+menu at a time (a collapsed header per menu), so the list stays short. The window uses `WS_EX_NOACTIVATE` + `SetCapture`, so
 it never takes the focus and still receives the click; labels and icons are
 drawn with GDI into small masks and blended by `radial::composite_mask`.
 To look at it without hardware:

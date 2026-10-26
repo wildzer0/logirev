@@ -143,6 +143,8 @@ pub struct SettingsApp {
     previews: BTreeMap<String, (String, egui::TextureHandle)>,
     /// Drag in progress on a menu wheel: menu name and source sector.
     wheel_drag: Option<(String, usize)>,
+    /// The menu whose details are open in the Radial menus page.
+    open_menu: Option<String>,
     new_program: String,
     running_programs: Vec<String>,
     logo: Option<TextureHandle>,
@@ -202,6 +204,7 @@ impl SettingsApp {
             backup_result: None,
             previews: BTreeMap::new(),
             wheel_drag: None,
+            open_menu: None,
             new_program: String::new(),
             running_programs: Vec::new(),
             logo: None,
@@ -2144,17 +2147,33 @@ impl SettingsApp {
             while self.raw.menus.contains_key(&format!("menu{n}")) {
                 n += 1;
             }
+            let name = format!("menu{n}");
             self.raw.menus.insert(
-                format!("menu{n}"),
+                name.clone(),
                 RawMenu {
                     title: None,
                     items: Vec::new(),
                 },
             );
+            self.open_menu = Some(name);
             self.changed();
+        }
+        if self.raw.menus.is_empty() {
+            ui.add_space(12.0);
+            ui.label(RichText::new(t.no_menus).color(pal.muted));
+            return;
+        }
+        // The selected menu may have disappeared after an external edit.
+        if self
+            .open_menu
+            .as_deref()
+            .is_some_and(|name| !self.raw.menus.contains_key(name))
+        {
+            self.open_menu = None;
         }
 
         let names: Vec<String> = self.raw.menus.keys().cloned().collect();
+        let mut open_menu = self.open_menu.clone();
         let mut changed = false;
         let mut rename: Option<(String, String)> = None;
         let mut delete: Option<String> = None;
@@ -2165,15 +2184,75 @@ impl SettingsApp {
             let Some(menu) = self.raw.menus.get_mut(name) else {
                 continue;
             };
-            ui.add_space(8.0);
-            section(
-                ui,
-                pal.card,
-                pal.border,
-                &format!("{}  {name}", icon::HAND_POINTING),
-                |ui| {
+            let open = open_menu.as_deref() == Some(name.as_str());
+            let title = menu
+                .title
+                .as_deref()
+                .map(str::trim)
+                .filter(|title| !title.is_empty());
+            let header = Frame::new()
+                .fill(if open { pal.card_hover } else { pal.card })
+                .stroke(Stroke::new(1.0, if open { ACCENT } else { pal.border }))
+                .corner_radius(CornerRadius::same(12))
+                .inner_margin(Margin::symmetric(12, 8))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
                     ui.horizontal(|ui| {
-                        ui.label(t.menu_name);
+                        ui.label(
+                            RichText::new(if open {
+                                icon::CARET_DOWN
+                            } else {
+                                icon::CARET_RIGHT
+                            })
+                            .size(14.0)
+                            .color(pal.muted),
+                        );
+                        ui.label(RichText::new(name).strong().size(15.0));
+                        if let Some(title) = title {
+                            ui.label(
+                                RichText::new(format!("· {}", shorten_text(title, 34)))
+                                    .small()
+                                    .color(pal.muted),
+                            );
+                        }
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            ui.label(
+                                RichText::new(format!(
+                                    "{}/{}",
+                                    menu.items.len(),
+                                    crate::radial::MAX_ITEMS
+                                ))
+                                .small()
+                                .color(pal.muted),
+                            );
+                        });
+                    });
+                });
+            let response = ui
+                .interact(
+                    header.response.rect,
+                    ui.scope_id().with(("menu-header", name.as_str())),
+                    Sense::click(),
+                )
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
+            if response.clicked() {
+                open_menu = if open { None } else { Some(name.clone()) };
+            }
+            if !open {
+                ui.add_space(6.0);
+                continue;
+            }
+
+            ui.add_space(4.0);
+            Frame::new()
+                .fill(pal.card)
+                .stroke(Stroke::new(1.0, pal.border))
+                .corner_radius(CornerRadius::same(12))
+                .inner_margin(Margin::symmetric(14, 12))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(t.menu_name).small().color(pal.muted));
                         // The draft lives in egui memory until the field loses
                         // focus: rebuilding it from `name` every frame would
                         // discard what the user types.
@@ -2183,7 +2262,7 @@ impl SettingsApp {
                             .data(|d| d.get_temp::<String>(draft_id))
                             .unwrap_or_else(|| name.clone());
                         let resp =
-                            ui.add(egui::TextEdit::singleline(&mut new_name).desired_width(200.0));
+                            ui.add(egui::TextEdit::singleline(&mut new_name).desired_width(180.0));
                         if resp.changed() {
                             ui.ctx()
                                 .data_mut(|d| d.insert_temp(draft_id, new_name.clone()));
@@ -2200,13 +2279,20 @@ impl SettingsApp {
                             }
                         }
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if ui.button(format!("{} {}", icon::TRASH, t.delete)).clicked() {
+                            if ui
+                                .add(
+                                    egui::Button::new(RichText::new(icon::TRASH).size(14.0))
+                                        .frame(false),
+                                )
+                                .on_hover_text(t.delete)
+                                .clicked()
+                            {
                                 delete = Some(name.clone());
                             }
                         });
                     });
                     ui.horizontal(|ui| {
-                        ui.label(t.menu_title);
+                        ui.label(RichText::new(t.menu_title).small().color(pal.muted));
                         let mut title = menu.title.clone().unwrap_or_default();
                         if ui
                             .add(
@@ -2220,7 +2306,7 @@ impl SettingsApp {
                             changed = true;
                         }
                     });
-                    ui.add_space(6.0);
+                    ui.add_space(2.0);
                     ui.label(
                         RichText::new(format!(
                             "{}: {}/{}",
@@ -2231,13 +2317,9 @@ impl SettingsApp {
                         .small()
                         .color(pal.muted),
                     );
-                    if menu.items.is_empty() {
-                        ui.label(RichText::new(t.menu_empty).small().color(pal.muted));
-                    }
                     let len = menu.items.len();
                     if len > 0 {
-                        ui.add_space(6.0);
-                        ui.label(RichText::new(t.preview).strong());
+                        ui.add_space(4.0);
                         ui.vertical_centered(|ui| {
                             menu_editor(
                                 ui,
@@ -2250,10 +2332,12 @@ impl SettingsApp {
                             );
                             ui.label(RichText::new(t.wheel_hint).small().color(pal.muted));
                         });
-                        ui.add_space(6.0);
+                        ui.add_space(4.0);
+                    } else {
+                        ui.label(RichText::new(t.menu_empty).small().color(pal.muted));
                     }
                     for (i, item) in menu.items.iter().enumerate() {
-                        card_row(ui, pal.card_hover, pal.border, |ui| {
+                        ui.horizontal(|ui| {
                             ui.label(
                                 RichText::new(
                                     item.icon
@@ -2261,7 +2345,7 @@ impl SettingsApp {
                                         .and_then(crate::radial::icon_glyph)
                                         .unwrap_or("•"),
                                 )
-                                .size(22.0)
+                                .size(18.0)
                                 .color(ACCENT),
                             );
                             ui.vertical(|ui| {
@@ -2270,22 +2354,46 @@ impl SettingsApp {
                                 ui.label(RichText::new(summary).small().color(pal.muted));
                             });
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if ui.button(icon::TRASH).on_hover_text(t.delete).clicked() {
+                                if ui
+                                    .add(
+                                        egui::Button::new(
+                                            RichText::new(icon::TRASH).size(14.0).color(pal.muted),
+                                        )
+                                        .frame(false),
+                                    )
+                                    .on_hover_text(t.delete)
+                                    .clicked()
+                                {
                                     remove_item = Some((name.clone(), i));
                                 }
                                 if ui
-                                    .button(format!("{} {}", icon::PENCIL, t.change))
+                                    .add(
+                                        egui::Button::new(
+                                            RichText::new(icon::PENCIL).size(14.0).color(pal.muted),
+                                        )
+                                        .frame(false),
+                                    )
+                                    .on_hover_text(t.change)
                                     .clicked()
                                 {
                                     edit = Some((name.clone(), Some(i)));
                                 }
                             });
                         });
+                        if i + 1 < len {
+                            ui.separator();
+                        }
                     }
                     ui.add_space(4.0);
                     if len < crate::radial::MAX_ITEMS {
                         if ui
-                            .button(format!("{} {}", icon::PLUS, t.add_item))
+                            .add(
+                                egui::Button::new(
+                                    RichText::new(format!("{} {}", icon::PLUS, t.add_item))
+                                        .color(ACCENT),
+                                )
+                                .frame(false),
+                            )
                             .clicked()
                         {
                             edit = Some((name.clone(), None));
@@ -2293,8 +2401,8 @@ impl SettingsApp {
                     } else {
                         ui.label(RichText::new(t.menu_limit).small().color(pal.muted));
                     }
-                },
-            );
+                });
+            ui.add_space(6.0);
         }
 
         if let Some((old, new)) = rename {
@@ -2302,6 +2410,9 @@ impl SettingsApp {
                 if let Some(menu) = self.raw.menus.remove(&old) {
                     self.raw.menus.insert(new.clone(), menu);
                     self.previews.remove(&old);
+                    if open_menu.as_deref() == Some(old.as_str()) {
+                        open_menu = Some(new.clone());
+                    }
                     rename_menu_uses(&mut self.raw, &old, &new);
                     changed = true;
                 }
@@ -2310,6 +2421,9 @@ impl SettingsApp {
         if let Some(name) = delete {
             self.raw.menus.remove(&name);
             self.previews.remove(&name);
+            if open_menu.as_deref() == Some(name.as_str()) {
+                open_menu = None;
+            }
             remove_menu_uses(&mut self.raw, &name);
             changed = true;
         }
@@ -2340,6 +2454,7 @@ impl SettingsApp {
                 });
             }
         }
+        self.open_menu = open_menu;
         if changed {
             self.changed();
         }

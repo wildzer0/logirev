@@ -341,8 +341,8 @@ texts! {
     backlight_down => "Darker", "Meno luminosa";
     backlight_toggle => "On / off", "Accendi / spegni";
     no_macros => "No macro yet: create one in the Macros page.", "Nessuna macro: creane una nella pagina Macro.";
-    no_menus => "No radial menu yet: create one in the Radial menus page.",
-        "Nessun menù radiale: creane uno nella pagina Menù radiali.";
+    no_menus => "No radial menu yet: create one with New menu.",
+        "Nessun menù radiale: creane uno con Nuovo menù.";
     radial_pointing_only => "A radial menu can only be opened by a pointing device (mouse, trackball, trackpad).",
         "Un menù radiale può essere aperto solo da un dispositivo di puntamento (mouse, trackball, touchpad).";
     repeat_held => "Repeat while the button is held", "Ripeti finché il tasto è premuto";
@@ -374,7 +374,6 @@ texts! {
     menu_name => "Name", "Nome";
     menu_title => "Title (optional)", "Titolo (opzionale)";
     menu_items => "Items", "Voci";
-    preview => "Preview", "Anteprima";
     wheel_hint => "Click a sector to edit it; drag a sector onto another to move it.",
         "Clicca uno spicchio per modificarlo; trascina uno spicchio su un altro per spostarlo.";
     menu_empty => "No items yet: add one below.", "Ancora nessuna voce: aggiungine una qui sotto.";

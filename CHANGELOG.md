@@ -3,6 +3,15 @@
 All notable changes are listed here. Versions follow
 [Semantic Versioning](https://semver.org).
 
+## [1.4.3] — 2026-10-26
+
+### Changed
+- The *Radial menus* page is now an accordion: the menus are a compact list
+  and only the selected one shows its details, so the last menu is always
+  reachable without scrolling through all the others.
+- The item rows of a menu are a minimal icon + label + action line with
+  small edit and delete buttons.
+
 ## [1.4.2] — 2026-10-26
 
 ### Fixed

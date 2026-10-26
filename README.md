@@ -194,9 +194,9 @@ scrolling for every mouse; export and import of all your settings.
 
 **Radial menus** (*Radial menus*): up to ten custom actions in a ring that
 opens under the pointer, assigned to a button of a mouse or trackball. The
-settings page shows an editable wheel: click a sector to edit it, drag one
-onto another to reorder. To look at the real menu without a receiver, run
-`logirev.exe --radial-demo`.
+settings page lists the menus collapsed (open one at a time) and shows an
+editable wheel: click a sector to edit it, drag one onto another to reorder.
+To look at the real menu without a receiver, run `logirev.exe --radial-demo`.
 
 **Developer mode** (*Settings → Developer mode*) adds a *Technical* tab to
 each device: serial number, firmware components, every feature (including
