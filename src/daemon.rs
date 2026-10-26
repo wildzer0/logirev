@@ -582,7 +582,16 @@ impl Daemon {
         };
         let mut ctx = ctx!(self);
         match self.links.iter_mut().find(|l| l.key == pending.link) {
-            Some(link) if link.sessions.contains_key(&pending.slot) => {
+            Some(link) => {
+                if !link.sessions.contains_key(&pending.slot) {
+                    // Global actions (shortcuts, clicks, programs, macros)
+                    // still work if the device slept while the menu was open;
+                    // device-specific ones simply do nothing.
+                    debug!(
+                        "slot {}: device is gone, running the global part of the choice",
+                        pending.slot
+                    );
+                }
                 info!(
                     "slot {}: radial menu -> {}",
                     pending.slot,
@@ -591,10 +600,7 @@ impl Daemon {
                 link.perform(&mut ctx, pending.slot, &action, true);
                 link.perform(&mut ctx, pending.slot, &action, false);
             }
-            _ => warn!(
-                "slot {}: device is gone, radial choice ignored",
-                pending.slot
-            ),
+            None => warn!("receiver {} is gone, radial choice ignored", pending.link),
         }
         let (notices, switch_all, radial, radial_release) =
             (ctx.notices, ctx.switch_all, ctx.radial, ctx.radial_release);

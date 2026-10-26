@@ -139,6 +139,8 @@ pub struct SettingsApp {
     report_copied: Option<Instant>,
     /// Outcome of the last export / import.
     backup_result: Option<Result<String, String>>,
+    /// Rendered previews of the radial menus, by menu name: `(items, texture)`.
+    previews: BTreeMap<String, (String, egui::TextureHandle)>,
     new_program: String,
     running_programs: Vec<String>,
     logo: Option<TextureHandle>,
@@ -196,6 +198,7 @@ impl SettingsApp {
             traffic_only_device: true,
             report_copied: None,
             backup_result: None,
+            previews: BTreeMap::new(),
             new_program: String::new(),
             running_programs: Vec::new(),
             logo: None,
@@ -2217,9 +2220,14 @@ impl SettingsApp {
                     });
                     ui.add_space(6.0);
                     ui.label(
-                        RichText::new(format!("{}: {}", t.menu_items, menu.items.len()))
-                            .small()
-                            .color(pal.muted),
+                        RichText::new(format!(
+                            "{}: {}/{}",
+                            t.menu_items,
+                            menu.items.len(),
+                            crate::radial::MAX_ITEMS
+                        ))
+                        .small()
+                        .color(pal.muted),
                     );
                     if menu.items.is_empty() {
                         ui.label(RichText::new(t.menu_empty).small().color(pal.muted));
@@ -2272,6 +2280,13 @@ impl SettingsApp {
                     } else {
                         ui.label(RichText::new(t.menu_limit).small().color(pal.muted));
                     }
+                    if len > 0 {
+                        ui.add_space(8.0);
+                        ui.label(RichText::new(t.preview).strong());
+                        ui.label(RichText::new(t.menus_hint).small().color(pal.muted));
+                        ui.add_space(4.0);
+                        menu_preview(ui, name, menu, &mut self.previews);
+                    }
                 },
             );
         }
@@ -2280,6 +2295,7 @@ impl SettingsApp {
             if !self.raw.menus.contains_key(&new) {
                 if let Some(menu) = self.raw.menus.remove(&old) {
                     self.raw.menus.insert(new.clone(), menu);
+                    self.previews.remove(&old);
                     rename_menu_uses(&mut self.raw, &old, &new);
                     changed = true;
                 }
@@ -2287,6 +2303,7 @@ impl SettingsApp {
         }
         if let Some(name) = delete {
             self.raw.menus.remove(&name);
+            self.previews.remove(&name);
             remove_menu_uses(&mut self.raw, &name);
             changed = true;
         }
@@ -2825,6 +2842,106 @@ impl eframe::App for SettingsApp {
 // ----------------------------------------------------------------------
 // Small widgets and helpers
 // ----------------------------------------------------------------------
+
+/// Draws a live preview of a radial menu with the same painter used by the
+/// Windows overlay, plus the labels and icons in egui.
+fn menu_preview(
+    ui: &mut Ui,
+    name: &str,
+    menu: &RawMenu,
+    previews: &mut BTreeMap<String, (String, egui::TextureHandle)>,
+) {
+    let metrics = crate::radial::Metrics::scaled(0.8);
+    let (w, h) = metrics.frame_size();
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(w as f32, h as f32), egui::Sense::hover());
+    let hover = response.hover_pos().and_then(|p| {
+        let dx = p.x - rect.center().x;
+        let dy = p.y - rect.center().y;
+        match crate::radial::Layout::new(menu.items.len()).hit(&metrics, dx, dy) {
+            crate::radial::Hit::Item(index) => Some(index),
+            _ => None,
+        }
+    });
+    let key = format!("{name}|{menu:?}|{hover:?}");
+    let texture = match previews.get(name) {
+        Some((cached, texture)) if *cached == key => texture.clone(),
+        _ => {
+            let frame = crate::radial::paint(menu.items.len(), hover, &metrics);
+            let image =
+                egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &frame.rgba);
+            let texture = ui.ctx().load_texture(
+                format!("radial-preview-{name}"),
+                image,
+                egui::TextureOptions::LINEAR,
+            );
+            previews.insert(name.to_owned(), (key, texture.clone()));
+            texture
+        }
+    };
+    let painter = ui.painter();
+    painter.image(
+        texture.id(),
+        rect,
+        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+        Color32::WHITE,
+    );
+    let white = Color32::from_rgb(235, 239, 247);
+    for (item, place) in menu
+        .items
+        .iter()
+        .zip(crate::radial::item_placements(menu.items.len(), &metrics))
+    {
+        if let Some(glyph) = item.icon.as_deref().and_then(crate::radial::icon_glyph) {
+            if let Some((x, y)) = place.icon {
+                painter.text(
+                    rect.min + egui::vec2(x, y),
+                    egui::Align2::CENTER_CENTER,
+                    glyph,
+                    egui::FontId::proportional(metrics.icon_size),
+                    white,
+                );
+            }
+        }
+        let (x, y) = place.label.center();
+        let max_chars =
+            ((place.label.width() / (metrics.label_size * 0.55)).floor() as usize).max(3);
+        painter.text(
+            rect.min + egui::vec2(x, y),
+            egui::Align2::CENTER_CENTER,
+            shorten_text(&item.label, max_chars),
+            egui::FontId::proportional(metrics.label_size),
+            white,
+        );
+    }
+    if let Some(place) = crate::radial::title_placement(menu.title.as_deref(), &metrics) {
+        if let Some(title) = menu
+            .title
+            .as_deref()
+            .map(str::trim)
+            .filter(|title| !title.is_empty())
+        {
+            let (x, y) = place.label.center();
+            painter.text(
+                rect.min + egui::vec2(x, y),
+                egui::Align2::CENTER_CENTER,
+                shorten_text(title, 20),
+                egui::FontId::proportional(metrics.title_size),
+                Color32::from_rgb(148, 163, 184),
+            );
+        }
+    }
+}
+
+/// Shortens `text` to `max` characters, adding an ellipsis.
+fn shorten_text(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_owned();
+    }
+    let mut out: String = text.chars().take(max.saturating_sub(1)).collect();
+    out.push('…');
+    out
+}
 
 /// A titled card.
 fn section(

@@ -39,9 +39,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetCursorPos, GetMessageW, KillTimer,
     LoadCursorW, PostQuitMessage, RegisterClassW, SetTimer, ShowWindow, TranslateMessage,
     UpdateLayeredWindow, IDC_ARROW, MA_NOACTIVATE, MSG, SW_HIDE, SW_SHOWNOACTIVATE, ULW_ALPHA,
-    WM_CAPTURECHANGED, WM_DESTROY, WM_LBUTTONDOWN, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_RBUTTONDOWN,
-    WM_TIMER, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
-    WS_POPUP,
+    WM_CAPTURECHANGED, WM_DESTROY, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE,
+    WM_RBUTTONDOWN, WM_TIMER, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    WS_EX_TOPMOST, WS_POPUP,
 };
 
 use super::util::wide;
@@ -170,6 +170,10 @@ struct Open {
     metrics: Metrics,
     layout: Layout,
     origin: POINT,
+    /// Where the pointer was when the menu opened.
+    opened_cursor: POINT,
+    /// The left button went down over a sector (the choice is made on release).
+    press_inside: bool,
     center: POINT,
     size: (u32, u32),
     hover: Option<usize>,
@@ -346,6 +350,8 @@ fn show_at(hwnd: HWND, menu: &RadialMenu, tx: Option<&Sender<Event>>, demo: bool
         metrics,
         layout: Layout::new(menu.items.len()),
         origin,
+        opened_cursor: cursor,
+        press_inside: false,
         center: POINT {
             x: origin.x + width as i32 / 2,
             y: origin.y + height as i32 / 2,
@@ -488,6 +494,16 @@ fn release_at(id: u64) {
         let mut cursor = POINT { x: 0, y: 0 };
         // SAFETY: plain query.
         unsafe { GetCursorPos(&mut cursor) };
+        // A release without movement is a click, even when the menu had to be
+        // moved away from a screen edge and the pointer is over a sector.
+        let (mx, my) = (
+            (cursor.x - open.opened_cursor.x) as f32,
+            (cursor.y - open.opened_cursor.y) as f32,
+        );
+        let moved = 18.0 * open.metrics.scale;
+        if mx * mx + my * my < moved * moved {
+            return None;
+        }
         let dx = (cursor.x - open.center.x) as f32;
         let dy = (cursor.y - open.center.y) as f32;
         match radial::release_action(open.layout, &open.metrics, dx, dy) {
@@ -515,7 +531,13 @@ fn close(selected: Option<usize>) {
     }
     if let Some(tx) = &open.tx {
         let event = match selected {
-            Some(index) => Event::RadialSelect { id: open.id, index },
+            Some(index) => {
+                debug!("radial menu: item {} selected", index + 1);
+                // Let the window disappear before the injected click/key
+                // arrives, so the action never lands on the menu itself.
+                std::thread::sleep(Duration::from_millis(12));
+                Event::RadialSelect { id: open.id, index }
+            }
             None => Event::RadialCancel { id: open.id },
         };
         let _ = tx.send(event);
@@ -777,7 +799,25 @@ unsafe extern "system" fn window_proc(
             0
         }
         WM_LBUTTONDOWN => {
-            close(hit());
+            // Choose on release, after the physical left button is up: an
+            // action that injects a click must not start while the user is
+            // still holding it.
+            let inside = hit().is_some();
+            OPEN.with(|state| {
+                if let Some(open) = state.borrow_mut().as_mut() {
+                    open.press_inside = inside;
+                }
+            });
+            0
+        }
+        WM_LBUTTONUP => {
+            let inside = OPEN.with(|state| {
+                state
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|open| open.press_inside)
+            });
+            close(if inside { hit() } else { None });
             0
         }
         WM_RBUTTONDOWN => {

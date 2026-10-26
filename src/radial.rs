@@ -112,18 +112,18 @@ impl Metrics {
         let scale = scale.max(0.5);
         Self {
             scale,
-            radius: 132.0 * scale,
-            inner: 44.0 * scale,
-            shadow: 14.0 * scale,
-            icon_size: 20.0 * scale,
-            label_size: 11.0 * scale,
-            title_size: 9.0 * scale,
+            radius: 140.0 * scale,
+            inner: 48.0 * scale,
+            shadow: 16.0 * scale,
+            icon_size: 22.0 * scale,
+            label_size: 12.0 * scale,
+            title_size: 10.0 * scale,
         }
     }
 
-    /// Width and height of the picture, shadow included.
+    /// Width and height of the picture, panel and shadow included.
     pub fn frame_size(&self) -> (u32, u32) {
-        let half = (self.radius + self.shadow + 2.0 * self.scale).ceil();
+        let half = (self.radius + PANEL_DIP * self.scale + self.shadow + 2.0 * self.scale).ceil();
         let size = (half * 2.0).max(1.0) as u32;
         (size, size)
     }
@@ -364,20 +364,29 @@ impl Frame {
 }
 
 // Colours of the menu. Kept here so the look is described in one place.
+// A dark frosted panel holds separated wedges, so the wheel reads as one
+// floating control instead of a thin ring.
 const SHADOW: [f32; 3] = [0.0, 0.0, 0.0];
-const RING_IN: [f32; 3] = [26.0, 30.0, 39.0];
-const RING_OUT: [f32; 3] = [36.0, 42.0, 54.0];
+const PANEL_IN: [f32; 3] = [12.0, 16.0, 22.0];
+const PANEL_OUT: [f32; 3] = [21.0, 26.0, 35.0];
+const RING_IN: [f32; 3] = [35.0, 41.0, 52.0];
+const RING_OUT: [f32; 3] = [45.0, 53.0, 67.0];
 const HOVER_IN: [f32; 3] = [34.0, 211.0, 238.0];
 const HOVER_OUT: [f32; 3] = [37.0, 99.0, 235.0];
-const CENTER: [f32; 3] = [17.0, 21.0, 28.0];
-const SEPARATOR: [f32; 3] = [45.0, 55.0, 72.0];
-const BORDER: [f32; 3] = [71.0, 85.0, 105.0];
+const HOVER_RIM: [f32; 3] = [186.0, 242.0, 255.0];
+const CENTER: [f32; 3] = [22.0, 27.0, 36.0];
+const BORDER: [f32; 3] = [58.0, 72.0, 94.0];
 const CLOSE: [f32; 3] = [148.0, 163.0, 184.0];
+/// Angular gap between two wedges (radians).
+const GAP: f32 = 0.022;
+/// Extra panel around the ring, in DIP.
+const PANEL_DIP: f32 = 8.0;
 
 /// Number of samples per axis used to anti-alias the ring.
 const SAMPLES: usize = 4;
 
-/// Paints the ring (sectors, border, shadow and close button).
+/// Paints the wheel: a frosted panel, separated wedges, the centre and the
+/// close button.
 ///
 /// `hover` is the item under the pointer, highlighted in the accent colour.
 pub fn paint(count: usize, hover: Option<usize>, m: &Metrics) -> Frame {
@@ -386,7 +395,8 @@ pub fn paint(count: usize, hover: Option<usize>, m: &Metrics) -> Frame {
     let (cx, cy) = m.center();
     let mut frame = Frame::new(w as usize, h as usize);
     let step = layout.step();
-    let separator = LINE_DIP * m.scale;
+    let line = LINE_DIP * m.scale;
+    let panel = m.radius + PANEL_DIP * m.scale;
     let (close_y, arm) = (cy - 4.0 * m.scale, CLOSE_ARM_DIP * m.scale);
     let close = CLOSE_THICKNESS_DIP * m.scale;
     let samples = SAMPLES * SAMPLES;
@@ -401,37 +411,46 @@ pub fn paint(count: usize, hover: Option<usize>, m: &Metrics) -> Frame {
                     let py = y as f32 + (sy as f32 + 0.5) / SAMPLES as f32;
                     let (dx, dy) = (px - cx, py - cy);
                     let d = (dx * dx + dy * dy).sqrt();
-                    let (color, a) = if d > m.radius {
-                        let t = ((d - m.radius) / m.shadow).clamp(0.0, 1.0);
-                        (SHADOW, (1.0 - t).powi(2) * 0.35)
-                    } else if d > m.radius - separator {
+                    let (color, a) = if d > panel {
+                        let t = ((d - panel) / m.shadow).clamp(0.0, 1.0);
+                        (SHADOW, (1.0 - t).powi(2) * 0.38)
+                    } else if d > panel - line {
                         (BORDER, 1.0)
                     } else if d < m.inner {
                         let sdy = py - close_y;
-                        let dx = dx.abs();
-                        let dy = sdy.abs();
-                        let on_x = ((dx - dy).abs() < close * 0.75
-                            || (dx + sdy).abs() < close * 0.75)
-                            && dx.max(dy) < arm;
+                        let adx = dx.abs();
+                        let ady = sdy.abs();
+                        let on_x = ((adx - ady).abs() < close * 0.75
+                            || (adx + sdy).abs() < close * 0.75)
+                            && adx.max(ady) < arm;
                         if on_x {
                             (CLOSE, 1.0)
-                        } else if d > m.inner - separator {
+                        } else if d > m.inner - line {
                             (BORDER, 1.0)
                         } else {
                             (CENTER, 0.97)
                         }
+                    } else if d > m.radius {
+                        // The rim of the frosted panel around the wedges.
+                        (lerp(PANEL_IN, PANEL_OUT, d / panel), 0.80)
                     } else {
                         let angle = dy.atan2(dx);
                         let rel = (angle + FRAC_PI_2 + step / 2.0).rem_euclid(TAU);
                         let sector = ((rel / step).floor() as usize).min(layout.count() - 1);
                         let inside = rel - sector as f32 * step;
-                        let edge = inside.min(step - inside) * d;
-                        if edge < separator * 0.75 {
-                            (SEPARATOR, 1.0)
+                        // The gap is measured in pixels along the arc, so it
+                        // keeps the same visual width at every radius.
+                        let gap = GAP * d;
+                        if inside * d < gap || (step - inside) * d < gap {
+                            (lerp(PANEL_IN, PANEL_OUT, d / panel), 0.80)
                         } else {
                             let t = ((d - m.inner) / (m.radius - m.inner)).clamp(0.0, 1.0);
                             if hover == Some(sector) {
-                                (lerp(HOVER_IN, HOVER_OUT, 0.15 + t * 0.75), 0.97)
+                                if d > m.radius - 2.2 * m.scale {
+                                    (HOVER_RIM, 1.0)
+                                } else {
+                                    (lerp(HOVER_IN, HOVER_OUT, 0.15 + t * 0.75), 0.97)
+                                }
                             } else {
                                 (lerp(RING_IN, RING_OUT, t), 0.96)
                             }

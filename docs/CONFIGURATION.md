@@ -310,6 +310,10 @@ precision = { action = "radial", menu = "work" }
   a receiver: `logirev.exe --radial-demo`.
 - A menu can have no items while you are editing it, but a `radial` action
   pointing at an empty menu does nothing.
+- The *Radial menus* page shows a **live preview** under each menu: hover a
+  wedge to see the highlight exactly as it will appear. The page also shows
+  the item count (`n/8`); eight is the maximum, because more would make the
+  labels unreadable.
 
 ### Key names
 

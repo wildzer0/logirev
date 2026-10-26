@@ -373,6 +373,7 @@ texts! {
     menu_name => "Name", "Nome";
     menu_title => "Title (optional)", "Titolo (opzionale)";
     menu_items => "Items", "Voci";
+    preview => "Preview", "Anteprima";
     menu_empty => "No items yet: add one below.", "Ancora nessuna voce: aggiungine una qui sotto.";
     menu_limit => "A menu can have at most eight items.", "Un menù può avere al massimo otto voci.";
     add_item => "Add item", "Aggiungi voce";

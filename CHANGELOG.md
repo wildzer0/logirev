@@ -3,6 +3,25 @@
 All notable changes are listed here. Versions follow
 [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Changed
+- Radial menu redesign: a frosted panel with separated wedges, larger
+  labels and icons, a clearer hover highlight, and a **live preview** under
+  each menu in the *Radial menus* page (hover a wedge in the preview).
+- The menus page shows the item count against the limit (8).
+
+### Fixed
+- Radial menu items are now chosen when the left mouse button is **released**
+  (previously on press): the injected click or shortcut no longer starts
+  while the physical button is still held, which made Back / Forward / click
+  actions unreliable.
+- Holding the button and releasing without moving keeps the menu open even
+  when the menu had to be moved away from a screen edge (no accidental
+  selection).
+- A choice still runs its global action (shortcut, click, program, macro) if
+  the device fell asleep while the menu was open.
+
 ## [1.4.0] — 2026-10-26
 
 ### Added
