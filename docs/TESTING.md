@@ -201,17 +201,17 @@ latest published release (e.g. set `version = "0.9.0"` locally).
 | Q1 | Run `logirev.exe --radial-demo` (quit logirev first only if it complains) | A dark ring appears under the pointer with six example items, icons and the title "logirev"; it fades in, does not steal the focus; clicking a sector or the X closes it. |
 | Q2 | Hover the sectors | The sector under the pointer turns cyan/blue; labels stay readable; the X in the middle is visible. |
 | Q3 | *Radial menus* → *New menu* → name it `work` → add two items: "Calculator" (`command = calc.exe`) and "Next desktop" (`desktop`, next); assign it to Back in the MX Ergo page (*Buttons* → Back → *Radial menu* → `work`) | Within a second Back opens the menu under the pointer; clicking "Calculator" opens it; clicking "Next desktop" switches desktop; clicking outside or the X closes without doing anything. |
-| Q4 | Set the item icon (e.g. `code`), rename the menu, reorder items, delete one | The menu reflects the changes after the automatic save; renaming also updates the button that opens it. |
+| Q4 | Set the item icon (e.g. `code`), rename the menu, drag a sector onto another, delete one | The menu reflects the changes after the automatic save; renaming also updates the button that opens it. |
 | Q5 | Assign a radial menu to a keyboard button by hand in `logirev.toml` | The log warns that only pointing devices can open it and the button does not open anything. |
-| Q6 | Eight items; use a long label | All sectors are visible; the long label is shortened with `…`; no sector overlaps. |
+| Q6 | Ten items; use a long label | All sectors are visible; the long label is shortened with `…`; no sector overlaps. |
 | Q7 | Display at 150 %/200 % and a monitor at the right/bottom edge | The ring is sharp and stays completely on screen (it shifts away from the edge). |
 | Q8 | `logirev.exe --radial-demo` on Linux (if built with the window) | The program exits with "the radial menu is only available on Windows". |
 | Q9 | Test with the "Desktop next/previous" preset in the button editor | On Windows Win+Ctrl+←/→ switches virtual desktop; on Linux Ctrl+Alt+←/→ (X11). |
 | Q10 | Assign the same menu to `tilt_left` and to the middle button | Both open the menu: it works on **any** configurable button of the pointing device, not just one dedicated key. |
 | Q11 | Press and hold the button, move over a sector, release | The item runs immediately; releasing in the middle keeps the menu open; releasing outside the ring closes it. |
 | Q12 | Quick click on the button (release in less than ~0.2 s) | The menu stays open for a click instead of choosing a sector by accident. |
-| Q13 | *Radial menus* page, with a menu that has items | A live preview of the wheel appears under the menu; hovering a wedge highlights it and shows the labels/icons; the page shows `n/8`. |
+| Q13 | *Radial menus* page, with a menu that has items | The wheel appears at the top and updates live; clicking a sector opens its editor; dragging a sector onto another moves it; the page shows `n/10`. |
 | Q14 | Choose "Back", "Forward" and a middle click from the menu in a browser / editor | Each action runs after the left button is released; no action starts while the mouse button is still down. |
-| Q15 | Add a ninth item | The *Add item* button is replaced by "A menu can have at most eight items"; the configuration refuses a ninth item too. |
+| Q15 | Add items up to the limit | At ten the *Add item* button is replaced by "A menu can have at most ten items"; the configuration refuses an eleventh item too. |
 | Q16 | Add the *Lock the PC* preset to a menu (or a button) and choose it | Windows locks at once; on Linux the session manager or screen locker locks. Unlike the old `Win+L` simulation, it works from a simulated action. |
 | Q17 | Open the menu and click on another window, on the desktop, or on the transparent shadow around the wheel | The menu closes without choosing anything; the click still reaches the window under the pointer. |

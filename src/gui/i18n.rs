@@ -368,15 +368,17 @@ texts! {
 
     // Radial menus page
     menus_title => "Radial menus", "Menù radiali";
-    menus_hint => "A radial menu opens under the pointer when any button of a mouse, trackball or trackpad is pressed. Click a sector, or hold the button, move over it and release. Up to eight items, clockwise from the top; each item runs any action.",
-        "Un menù radiale si apre sotto il puntatore quando si preme un tasto qualsiasi di un mouse, trackball o touchpad. Fai clic su una voce, oppure tieni premuto il tasto, muoviti sopra la voce e rilascia. Fino a otto voci, in senso orario dall'alto; ogni voce esegue un'azione qualsiasi.";
+    menus_hint => "A radial menu opens under the pointer when any button of a mouse, trackball or trackpad is pressed. Click a sector, or hold the button, move over it and release. Up to ten items, clockwise from the top; each item runs any action.",
+        "Un menù radiale si apre sotto il puntatore quando si preme un tasto qualsiasi di un mouse, trackball o touchpad. Fai clic su una voce, oppure tieni premuto il tasto, muoviti sopra la voce e rilascia. Fino a dieci voci, in senso orario dall'alto; ogni voce esegue un'azione qualsiasi.";
     new_menu => "New menu", "Nuovo menù";
     menu_name => "Name", "Nome";
     menu_title => "Title (optional)", "Titolo (opzionale)";
     menu_items => "Items", "Voci";
     preview => "Preview", "Anteprima";
+    wheel_hint => "Click a sector to edit it; drag a sector onto another to move it.",
+        "Clicca uno spicchio per modificarlo; trascina uno spicchio su un altro per spostarlo.";
     menu_empty => "No items yet: add one below.", "Ancora nessuna voce: aggiungine una qui sotto.";
-    menu_limit => "A menu can have at most eight items.", "Un menù può avere al massimo otto voci.";
+    menu_limit => "A menu can have at most ten items.", "Un menù può avere al massimo dieci voci.";
     add_item => "Add item", "Aggiungi voce";
     edit_item => "Edit item", "Modifica voce";
     new_item => "New item", "Nuova voce";

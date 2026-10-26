@@ -254,7 +254,7 @@ movement; on other buttons a gesture only performs its `click` action.
 
 ### Radial menus (Windows)
 
-A radial menu is a ring of up to **eight** actions that opens **under the
+A radial menu is a ring of up to **ten** actions that opens **under the
 pointer**. Assign it to a button of a pointing device (mouse, trackball or
 trackpad) with the `radial` action; the button itself does not need gestures.
 
@@ -311,10 +311,11 @@ precision = { action = "radial", menu = "work" }
   a receiver: `logirev.exe --radial-demo`.
 - A menu can have no items while you are editing it, but a `radial` action
   pointing at an empty menu does nothing.
-- The *Radial menus* page shows a **live preview** under each menu: hover a
-  wedge to see the highlight exactly as it will appear. The page also shows
-  the item count (`n/8`); eight is the maximum, because more would make the
-  labels unreadable.
+- The *Radial menus* page shows the **wheel itself**: click a sector to edit
+  its label, icon and action; drag a sector onto another to move it. The
+  preview uses the same painter as the real menu, so what you see is what
+  opens under the pointer. The page also shows the item count (`n/10`); ten
+  is the maximum, because more would make the labels unreadable.
 
 ### Key names
 

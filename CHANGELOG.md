@@ -17,6 +17,12 @@ All notable changes are listed here. Versions follow
   the usual screen lockers on Linux) instead of simulating `Win+L`, which
   Windows ignores when it comes from `SendInput`.
 
+### Changed
+- The *Radial menus* page is now a graphical editor: the wheel is shown at
+  the top; click a sector to edit it and drag a sector onto another to move
+  it. The up/down arrows are gone.
+- A menu can have up to **ten** items (was eight); the page shows `n/10`.
+
 ## [1.4.1] — 2026-10-26
 
 ### Added

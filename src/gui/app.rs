@@ -141,6 +141,8 @@ pub struct SettingsApp {
     backup_result: Option<Result<String, String>>,
     /// Rendered previews of the radial menus, by menu name: `(items, texture)`.
     previews: BTreeMap<String, (String, egui::TextureHandle)>,
+    /// Drag in progress on a menu wheel: menu name and source sector.
+    wheel_drag: Option<(String, usize)>,
     new_program: String,
     running_programs: Vec<String>,
     logo: Option<TextureHandle>,
@@ -199,6 +201,7 @@ impl SettingsApp {
             report_copied: None,
             backup_result: None,
             previews: BTreeMap::new(),
+            wheel_drag: None,
             new_program: String::new(),
             running_programs: Vec::new(),
             logo: None,
@@ -2156,7 +2159,6 @@ impl SettingsApp {
         let mut rename: Option<(String, String)> = None;
         let mut delete: Option<String> = None;
         let mut edit: Option<(String, Option<usize>)> = None;
-        let mut move_item: Option<(String, usize, isize)> = None;
         let mut remove_item: Option<(String, usize)> = None;
 
         for name in &names {
@@ -2233,6 +2235,23 @@ impl SettingsApp {
                         ui.label(RichText::new(t.menu_empty).small().color(pal.muted));
                     }
                     let len = menu.items.len();
+                    if len > 0 {
+                        ui.add_space(6.0);
+                        ui.label(RichText::new(t.preview).strong());
+                        ui.vertical_centered(|ui| {
+                            menu_editor(
+                                ui,
+                                name,
+                                menu,
+                                &mut self.previews,
+                                &mut self.wheel_drag,
+                                &mut edit,
+                                &mut changed,
+                            );
+                            ui.label(RichText::new(t.wheel_hint).small().color(pal.muted));
+                        });
+                        ui.add_space(6.0);
+                    }
                     for (i, item) in menu.items.iter().enumerate() {
                         card_row(ui, pal.card_hover, pal.border, |ui| {
                             ui.label(
@@ -2254,12 +2273,6 @@ impl SettingsApp {
                                 if ui.button(icon::TRASH).on_hover_text(t.delete).clicked() {
                                     remove_item = Some((name.clone(), i));
                                 }
-                                if i + 1 < len && ui.button(icon::CARET_DOWN).clicked() {
-                                    move_item = Some((name.clone(), i, 1));
-                                }
-                                if i > 0 && ui.button(icon::CARET_UP).clicked() {
-                                    move_item = Some((name.clone(), i, -1));
-                                }
                                 if ui
                                     .button(format!("{} {}", icon::PENCIL, t.change))
                                     .clicked()
@@ -2280,13 +2293,6 @@ impl SettingsApp {
                     } else {
                         ui.label(RichText::new(t.menu_limit).small().color(pal.muted));
                     }
-                    if len > 0 {
-                        ui.add_space(8.0);
-                        ui.label(RichText::new(t.preview).strong());
-                        ui.label(RichText::new(t.menus_hint).small().color(pal.muted));
-                        ui.add_space(4.0);
-                        menu_preview(ui, name, menu, &mut self.previews);
-                    }
                 },
             );
         }
@@ -2306,15 +2312,6 @@ impl SettingsApp {
             self.previews.remove(&name);
             remove_menu_uses(&mut self.raw, &name);
             changed = true;
-        }
-        if let Some((menu, index, delta)) = move_item {
-            if let Some(m) = self.raw.menus.get_mut(&menu) {
-                let target = index as isize + delta;
-                if target >= 0 && (target as usize) < m.items.len() {
-                    m.items.swap(index, target as usize);
-                    changed = true;
-                }
-            }
         }
         if let Some((menu, index)) = remove_item {
             if let Some(m) = self.raw.menus.get_mut(&menu) {
@@ -2843,26 +2840,32 @@ impl eframe::App for SettingsApp {
 // Small widgets and helpers
 // ----------------------------------------------------------------------
 
-/// Draws a live preview of a radial menu with the same painter used by the
-/// Windows overlay, plus the labels and icons in egui.
-fn menu_preview(
+/// Draws the editable wheel with the same painter used by the Windows
+/// overlay. Click a sector to edit it; drag a sector onto another to move it.
+fn menu_editor(
     ui: &mut Ui,
     name: &str,
-    menu: &RawMenu,
+    menu: &mut RawMenu,
     previews: &mut BTreeMap<String, (String, egui::TextureHandle)>,
+    wheel_drag: &mut Option<(String, usize)>,
+    edit: &mut Option<(String, Option<usize>)>,
+    changed: &mut bool,
 ) {
     let metrics = crate::radial::Metrics::scaled(0.8);
     let (w, h) = metrics.frame_size();
-    let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(w as f32, h as f32), egui::Sense::hover());
-    let hover = response.hover_pos().and_then(|p| {
-        let dx = p.x - rect.center().x;
-        let dy = p.y - rect.center().y;
-        match crate::radial::Layout::new(menu.items.len()).hit(&metrics, dx, dy) {
-            crate::radial::Hit::Item(index) => Some(index),
-            _ => None,
-        }
-    });
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(w as f32, h as f32),
+        egui::Sense::click_and_drag(),
+    );
+    let pointer = response
+        .interact_pointer_pos()
+        .or_else(|| ui.ctx().pointer_latest_pos());
+    let hover_pos = if response.dragged() {
+        pointer
+    } else {
+        response.hover_pos()
+    };
+    let hover = hover_pos.and_then(|p| wheel_sector(p, rect, &metrics, menu.items.len()));
     let key = format!("{name}|{menu:?}|{hover:?}");
     let texture = match previews.get(name) {
         Some((cached, texture)) if *cached == key => texture.clone(),
@@ -2931,6 +2934,92 @@ fn menu_preview(
             );
         }
     }
+
+    // A drag can outlive the item it refers to if the list changes.
+    let stale = wheel_drag
+        .as_ref()
+        .is_some_and(|(drag_name, from)| drag_name == name && *from >= menu.items.len());
+    if stale {
+        *wheel_drag = None;
+    }
+    let target = pointer.and_then(|p| wheel_sector(p, rect, &metrics, menu.items.len()));
+    if response.drag_started() {
+        let origin = ui
+            .input(|i| i.pointer.press_origin())
+            .or(pointer)
+            .and_then(|p| wheel_sector(p, rect, &metrics, menu.items.len()));
+        if let Some(from) = origin {
+            *wheel_drag = Some((name.to_owned(), from));
+        }
+    }
+    if response.clicked() {
+        if let Some(index) = target {
+            *edit = Some((name.to_owned(), Some(index)));
+        }
+    }
+    if response.drag_stopped() {
+        if let Some((from_name, from)) = wheel_drag.take() {
+            if from_name == name {
+                if let Some(to) = target {
+                    if from != to {
+                        move_menu_item(&mut menu.items, from, to);
+                        *changed = true;
+                    }
+                }
+            }
+        }
+    }
+    if let Some((drag_name, from)) = wheel_drag.as_ref() {
+        if drag_name == name {
+            if let Some(item) = menu.items.get(*from) {
+                let pos = pointer.unwrap_or_else(|| rect.center());
+                let painter = ui.painter();
+                painter.circle_filled(pos, 17.0, Color32::from_black_alpha(220));
+                painter.circle_stroke(pos, 17.0, egui::Stroke::new(1.5, ACCENT));
+                painter.text(
+                    pos,
+                    egui::Align2::CENTER_CENTER,
+                    shorten_text(&item.label, 12),
+                    egui::FontId::proportional(10.0),
+                    white,
+                );
+            }
+        }
+    }
+    if response.hovered() || response.dragged() {
+        ui.ctx().set_cursor_icon(if response.dragged() {
+            egui::CursorIcon::Grabbing
+        } else {
+            egui::CursorIcon::Grab
+        });
+    }
+}
+
+/// The sector under `pointer`, if it is inside the ring.
+fn wheel_sector(
+    pointer: egui::Pos2,
+    rect: egui::Rect,
+    metrics: &crate::radial::Metrics,
+    count: usize,
+) -> Option<usize> {
+    if count == 0 {
+        return None;
+    }
+    let dx = pointer.x - rect.center().x;
+    let dy = pointer.y - rect.center().y;
+    match crate::radial::Layout::new(count).hit(metrics, dx, dy) {
+        crate::radial::Hit::Item(index) => Some(index),
+        _ => None,
+    }
+}
+
+/// Moves the item at `from` to the `to` sector.
+fn move_menu_item(items: &mut Vec<RawMenuItem>, from: usize, to: usize) {
+    if from == to || from >= items.len() || to >= items.len() {
+        return;
+    }
+    let item = items.remove(from);
+    items.insert(to, item);
 }
 
 /// Shortens `text` to `max` characters, adding an ellipsis.
@@ -3625,6 +3714,32 @@ mod tests {
             RawAction::Disable
         ));
         assert!(matches!(raw.menus["m"].items[0].action, RawAction::Disable));
+    }
+
+    #[test]
+    fn moves_menu_items_on_the_wheel() {
+        let item = |label: &str| RawMenuItem {
+            label: label.into(),
+            icon: None,
+            action: RawAction::Disable,
+        };
+        let mut items = vec![item("a"), item("b"), item("c")];
+        move_menu_item(&mut items, 0, 2);
+        assert_eq!(
+            items.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(),
+            ["b", "c", "a"]
+        );
+        move_menu_item(&mut items, 2, 0);
+        assert_eq!(
+            items.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(),
+            ["a", "b", "c"]
+        );
+        move_menu_item(&mut items, 1, 1);
+        move_menu_item(&mut items, 3, 0);
+        assert_eq!(
+            items.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(),
+            ["a", "b", "c"]
+        );
     }
 
     #[test]

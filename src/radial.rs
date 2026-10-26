@@ -19,7 +19,7 @@ use std::f32::consts::{FRAC_PI_2, TAU};
 use crate::icons;
 
 /// Most items a menu can have (a sector each; more would not fit).
-pub const MAX_ITEMS: usize = 8;
+pub const MAX_ITEMS: usize = 10;
 /// Longest label accepted in the configuration (the window ellipsizes).
 pub const MAX_LABEL_CHARS: usize = 24;
 /// Longest title accepted in the configuration.
@@ -225,7 +225,7 @@ pub struct Layout {
 }
 
 impl Layout {
-    /// Layout with the given number of items (clamped to 1..=8).
+    /// Layout with the given number of items (clamped to `1..=MAX_ITEMS`).
     pub fn new(count: usize) -> Self {
         Self {
             count: count.clamp(1, MAX_ITEMS),

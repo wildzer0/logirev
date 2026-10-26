@@ -83,7 +83,7 @@ pub struct RawMenu {
     /// Short title shown in the middle of the menu (optional).
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    /// The sectors, clockwise from the top (at most eight).
+    /// The sectors, clockwise from the top (at most ten).
     pub items: Vec<RawMenuItem>,
 }
 
