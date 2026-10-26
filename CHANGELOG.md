@@ -3,7 +3,7 @@
 All notable changes are listed here. Versions follow
 [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
+## [1.5.2] — 2026-10-26
 
 ### Added
 - Battery refresh: the daemon re-reads a connected device's battery every
